@@ -11,6 +11,9 @@ wheels/
 
 # certificates
 certs-example/
+my-certs/
+*.pem
+*.der
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
