@@ -38,12 +38,16 @@ class RuntimeConfig:
     connection: ConnectionConfig
     browse: BrowseConfig
     collect: CollectConfig
+    mode: str = "prod"
+    debug_log_dir: str = "logs/debug"
 
     @classmethod
     def from_namespace(cls, args) -> "RuntimeConfig":
         return cls(
             command=getattr(args, "command", ""),
             log_level=getattr(args, "log_level", "INFO"),
+            mode=getattr(args, "mode", "prod"),
+            debug_log_dir=getattr(args, "debug_log_dir", "logs/debug"),
             connection=ConnectionConfig(
                 url=getattr(args, "url", "opc.tcp://10.205.139.4:4840"),
                 timeout=float(getattr(args, "timeout", 30.0)),

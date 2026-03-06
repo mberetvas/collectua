@@ -1,7 +1,10 @@
 import argparse
 import asyncio
 import logging
+import os
 import socket
+from datetime import datetime
+from pathlib import Path
 
 from asyncua import Client
 
@@ -9,12 +12,62 @@ from . import browse, collector
 from .runtime_config import RuntimeConfig
 
 
-def _configure_logging(level: str):
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+def _configure_logging(mode: str, log_level: str, debug_log_dir: str = "logs/debug") -> str | None:
+    """
+    Configure logging with optional file handler for debug mode.
+
+    Args:
+        mode: 'prod' or 'debug'
+        log_level: User-specified log level (DEBUG, INFO, WARNING, ERROR)
+        debug_log_dir: Directory for debug log files (only used in debug mode)
+
+    Returns:
+        Path to debug log file if created, else None
+    """
+    # Get root logger and clear any existing handlers to avoid duplicates
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # Determine console level based on mode and user override
+    if mode == "debug":
+        console_level = getattr(logging, log_level.upper(), logging.INFO)
+        file_level = logging.DEBUG
+    else:  # prod mode
+        console_level = getattr(logging, log_level.upper(), logging.INFO)
+        file_level = None
+
+    # Console handler (always present)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(console_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler (debug mode only)
+    debug_log_file = None
+    if mode == "debug":
+        # Ensure debug log directory exists
+        debug_dir_path = Path(debug_log_dir)
+        debug_dir_path.mkdir(parents=True, exist_ok=True)
+
+        # Create unique filename: debug-YYYYMMDD-HHMMSS-pidNNNN.log
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        pid = os.getpid()
+        debug_log_file = debug_dir_path / f"debug-{timestamp}-pid{pid}.log"
+
+        file_handler = logging.FileHandler(debug_log_file)
+        file_handler.setLevel(file_level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # Set root logger to lowest level to allow handlers to filter
+    if mode == "debug":
+        root_logger.setLevel(logging.DEBUG)
+    else:
+        root_logger.setLevel(console_level)
+
+    return str(debug_log_file) if debug_log_file else None
 
 
 async def _connect_smoke(config: RuntimeConfig):
@@ -56,10 +109,21 @@ def _build_parser() -> argparse.ArgumentParser:
         description="OPC UA command center CLI",
     )
     parser.add_argument(
+        "--mode",
+        choices=["prod", "debug"],
+        default="prod",
+        help="Runtime mode: 'prod' (default, INFO level console-only) or 'debug' (DEBUG level with per-run log file)",
+    )
+    parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default="INFO",
-        help="Logging verbosity",
+        help="Console logging level (overrides mode defaults)",
+    )
+    parser.add_argument(
+        "--debug-log-dir",
+        default="logs/debug",
+        help="Directory for debug log files (only used in debug mode)",
     )
 
     subparsers = parser.add_subparsers(dest="command")
@@ -179,7 +243,11 @@ def main(argv=None) -> int:
             print(f"[config error] {error}")
         return 2
 
-    _configure_logging(args.log_level)
+    # Configure logging with mode and optional debug file
+    debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir)
+    if debug_log_file:
+        logger = logging.getLogger("cli")
+        logger.info(f"Debug log: {debug_log_file}")
 
     if args.command == "browse":
         asyncio.run(
