@@ -5,15 +5,33 @@ import socket
 from dataclasses import dataclass
 from asyncua import Client, Node, ua
 
+
 @dataclass
-class ClientConfig:
+class ClientConfigSecure:
     url: str = "opc.tcp://10.205.139.4:4840"
     username: str = "OPCGB"
     password: str = "OPCgb123!"
     auth_policy: str = "Basic256"  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
-    security_mode: str = "Sign" # Options: "None_", "Sign", "SignAndEncrypt"
-    cert_file: str = "/home/administrator/dev_projects/opcua_client/certs-example/certs/myclient-selfsigned.der"
-    key_file: str = "/home/administrator/dev_projects/opcua_client/certs-example/private/myclient.pem"
+    security_mode: str = "Sign"  # Options: "None_", "Sign", "SignAndEncrypt"
+    cert_file: str = "/home/administrator/dev_projects/opcua_client/my-certs/opcua_certs/own/certs/MyOPCUAClient.der"
+    key_file: str = (
+        "/home/administrator/dev_projects/opcua_client/my-certs/opcua_certs/own/private/MyOPCUAClient_key.pem"
+    )
+    log_level: int = logging.INFO
+    timeout: float = 30.0  # Socket communication timeout in seconds
+    session_timeout: int = 60000  # Session timeout in milliseconds (negotiated with server)
+    request_timeout: int = 20000  # Individual request timeout in milliseconds for session activation and operations
+
+
+@dataclass
+class ClientConfigInsecure:
+    url: str = "opc.tcp://10.205.139.4:4840"
+    username: str = ""
+    password: str = ""
+    auth_policy: str = "None"  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
+    security_mode: str = "None_"  # Options: "None_", "Sign", "SignAndEncrypt"
+    cert_file: str = ""
+    key_file: str = ""
     log_level: int = logging.INFO
     timeout: float = 30.0  # Socket communication timeout in seconds
     session_timeout: int = 60000  # Session timeout in milliseconds (negotiated with server)
@@ -49,22 +67,22 @@ async def browse_nodes(node: Node):
     }
 
 
-async def task(config: ClientConfig):
+async def task(config: ClientConfigInsecure):
     """
     Connect to OPC UA server and browse the address space.
-    
+
     Timeout Configuration Notes:
-    
+
     - Server-side limits: The server enforces its own maximum session timeout. The client
       requests a timeout value during session creation, but the server may return a lower
       value. Check log output to see the negotiated timeout (e.g., "got 30000ms instead").
       Increasing client-side timeout won't override server limits.
-    
+
     - Keep-alive strategy: For long-lived connections where the client may be idle,
       implement keep-alive by calling client.get_keepalive_count() to determine when
       to send notifications. This prevents the server from closing idle sessions.
       Recommended keep-alive interval: 75% of negotiated session timeout.
-    
+
     - Async timeout handling: The 'timeout' parameter (in seconds) applies to socket-level
       communication and request handling. Separate timeouts exist for:
       * Connection establishment (socket timeout)
@@ -75,19 +93,19 @@ async def task(config: ClientConfig):
     try:
         client = Client(url=config.url, timeout=config.timeout)
         # Matches the URI defined in generate_certificates.py
-        client.application_uri = f"urn:{socket.gethostname()}:foobar:myclient" 
-        client.set_user(config.username)
-        client.set_password(config.password)
+        client.application_uri = f"urn:{socket.gethostname()}:foobar:myclient"
         # Configure session and request timeouts before connection
         client.session_timeout = config.session_timeout
         client.uaclient.request_timeout = config.request_timeout
-        _logger.info("Requesting session timeout of %dms, request timeout %dms", config.session_timeout, config.request_timeout)
+        _logger.info(
+            "Requesting session timeout of %dms, request timeout %dms", config.session_timeout, config.request_timeout
+        )
         # Set authentication policy if needed (commented out for basic username/password auth)
-        if config.security_mode == "None_":
-            # When using None security mode, use the None policy
-            await client.set_security_string(f"None,{config.security_mode},,")
-        else:
-            await client.set_security_string(f"{config.auth_policy},{config.security_mode},{config.cert_file},{config.key_file}")
+        if config.security_mode != "None_":
+            # Only set security for non-None modes
+            await client.set_security_string(
+                f"{config.auth_policy},{config.security_mode},{config.cert_file},{config.key_file}"
+            )
         await client.connect()
         # Log actual negotiated session timeout from server
         _logger.info("Connected. Negotiated session timeout: %dms", client.session_timeout)
@@ -107,16 +125,13 @@ async def task(config: ClientConfig):
 
 
 def main():
-    config = ClientConfig()
+    config = ClientConfigInsecure()
     logging.basicConfig(
         level=config.log_level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    loop = asyncio.get_event_loop()
-    loop.set_debug(True)
-    loop.run_until_complete(task(config))
-    loop.close()
+    asyncio.run(task(config))
 
 
 if __name__ == "__main__":

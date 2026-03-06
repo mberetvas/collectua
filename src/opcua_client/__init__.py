@@ -1,2 +1,5 @@
-def main() -> None:
-    print("Hello from opcua-client!")
+from opcua_client.cli import main as cli_main
+
+
+def main() -> int:
+    return cli_main()
