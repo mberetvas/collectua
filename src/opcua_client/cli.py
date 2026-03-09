@@ -9,6 +9,7 @@ from pathlib import Path
 from asyncua import Client
 
 from . import browse, collector
+from .profile_loader import list_profiles, load_profile
 from .runtime_config import RuntimeConfig
 
 
@@ -128,8 +129,16 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command")
 
+    def _add_connection_profile_arg(subparser: argparse.ArgumentParser) -> None:
+        subparser.add_argument(
+            "--connection-profile",
+            default=None,
+            help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+        )
+
     browse_parser = subparsers.add_parser("browse", help="Browse OPC UA node tree")
-    browse_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
+    _add_connection_profile_arg(browse_parser)
+    browse_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     browse_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     browse_parser.add_argument(
         "--target-namespace",
@@ -138,10 +147,11 @@ def _build_parser() -> argparse.ArgumentParser:
         default=[],
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    browse_parser.add_argument("--timeout", type=float, default=browse.TIMEOUT, help="Socket timeout (seconds)")
+    browse_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
 
     collect_parser = subparsers.add_parser("collect", help="Subscribe to alarms/events and write CSV")
-    collect_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
+    _add_connection_profile_arg(collect_parser)
+    collect_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     collect_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
     collect_parser.add_argument(
         "--publish-interval-ms",
@@ -158,53 +168,63 @@ def _build_parser() -> argparse.ArgumentParser:
     collect_parser.add_argument(
         "--timeout",
         type=float,
-        default=collector.TIMEOUT,
+        default=argparse.SUPPRESS,
         help="Socket timeout (seconds)",
     )
 
     connect_parser = subparsers.add_parser("connect", help="Connection smoke test (supports secure/insecure)")
-    connect_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
-    connect_parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
-    connect_parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
-    connect_parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")
-    connect_parser.add_argument("--username", default="", help="Username for user/password auth")
-    connect_parser.add_argument("--password", default="", help="Password for user/password auth")
+    _add_connection_profile_arg(connect_parser)
+    connect_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
+    connect_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
+    connect_parser.add_argument(
+        "--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)"
+    )
+    connect_parser.add_argument(
+        "--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)"
+    )
+    connect_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
+    connect_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
     connect_parser.add_argument(
         "--auth-policy",
-        default="None",
+        default=argparse.SUPPRESS,
         choices=["None", "Basic128Rsa15", "Basic256", "Basic256Sha256"],
         help="Security policy",
     )
     connect_parser.add_argument(
         "--security-mode",
-        default="None_",
+        default=argparse.SUPPRESS,
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    connect_parser.add_argument("--cert-file", default="", help="Client certificate path")
-    connect_parser.add_argument("--key-file", default="", help="Client private key path")
+    connect_parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
+    connect_parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
 
     config_parser = subparsers.add_parser("config", help="Show or validate normalized runtime configuration")
-    config_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
-    config_parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
-    config_parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
-    config_parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")
-    config_parser.add_argument("--username", default="", help="Username for user/password auth")
-    config_parser.add_argument("--password", default="", help="Password for user/password auth")
+    _add_connection_profile_arg(config_parser)
+    config_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
+    config_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
+    config_parser.add_argument(
+        "--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)"
+    )
+    config_parser.add_argument(
+        "--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)"
+    )
+    config_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
+    config_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
     config_parser.add_argument(
         "--auth-policy",
-        default="None",
+        default=argparse.SUPPRESS,
         choices=["None", "Basic128Rsa15", "Basic256", "Basic256Sha256"],
         help="Security policy",
     )
     config_parser.add_argument(
         "--security-mode",
-        default="None_",
+        default=argparse.SUPPRESS,
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    config_parser.add_argument("--cert-file", default="", help="Client certificate path")
-    config_parser.add_argument("--key-file", default="", help="Client private key path")
+    config_parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
+    config_parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
     config_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     config_parser.add_argument(
         "--target-namespace",
@@ -238,6 +258,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show sensitive values such as passwords in output",
     )
 
+    list_profiles_parser = subparsers.add_parser("list-profiles", help="List available connection profiles")
+
     return parser
 
 
@@ -248,6 +270,28 @@ def main(argv=None) -> int:
     if not args.command:
         parser.print_help()
         return 0
+
+    if args.command == "list-profiles":
+        profiles = list_profiles()
+        if not profiles:
+            print("No connection profiles found in ./connections/ or ~/.config/opcua-client/connections/")
+            return 0
+        print("Available connection profiles:")
+        for name in profiles:
+            print(f"  - {name}")
+        return 0
+
+    profile_name = getattr(args, "connection_profile", None)
+    if profile_name:
+        try:
+            profile_values = load_profile(profile_name)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"[profile error] {exc}")
+            return 2
+
+        for key, value in profile_values.items():
+            if not hasattr(args, key):
+                setattr(args, key, value)
 
     config = RuntimeConfig.from_namespace(args)
     errors = config.validate()

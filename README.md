@@ -14,33 +14,7 @@
 
 **Status:** Early Stage / Alpha
 
-This project is in active development. The core functionality is stable and ready for testing, but breaking changes may occur before v1.0.0.
-
-### Roadmap
-
-- ✅ **v0.1.0** - Initial release
-  - CLI interface with four core commands
-  - Basic OPC UA server connectivity and browsing
-  - Alarm/event collection and CSV export
-  - Interactive Textual-based TUI for live monitoring and node inspection
-  - Production and debug runtime modes
-  
-- 🔄 **v0.2.0** (Planned)
-  - Enhanced data visualization
-  - Batch operations and scripting support
-  - Configuration file support (YAML/TOML)
-
-- 📋 **v0.3.0** (Planned)
-  - Advanced filtering and query capabilities
-  - Historical data export
-  - Performance profiling tools
-  - Cloud integration (HTTP/REST gateway)
-
-- 🎯 **v1.0.0** (Target)
-  - Stable API and CLI interface
-  - Comprehensive test coverage (>80%)
-  - Complete documentation with examples
-  - Docker support
+This project is in active development. The core functionality is stable and ready for testing, but breaking changes may occur before.
 
 ## Prerequisites
 
@@ -161,9 +135,13 @@ opcua-tui --help
 
 ## Quickstart
 
-### ⚠️ Important: OPC UA URL is Required
+### ⚠️ Important: Provide Connection Settings
 
-All commands require an explicit `--url` argument pointing to your OPC UA server. There are no hardcoded defaults for security and correctness reasons.
+Use either:
+
+- an explicit `--url` (and optional auth/security args), or
+- a reusable connection profile via `--connection-profile`, or
+- for TUI only, run with no args and choose a discovered profile interactively.
 
 ```bash
 # Format: opc.tcp://hostname:port
@@ -210,8 +188,11 @@ opcua-client collect \
 ### Interactive TUI Mode
 
 ```bash
-# Launch interactive terminal UI for real-time monitoring
+# Launch interactive terminal UI for real-time monitoring (direct URL)
 opcua-tui --url opc.tcp://localhost:4840
+
+# Or launch with no args and choose from available profiles
+opcua-tui
 ```
 
 ## TUI Overview
@@ -229,16 +210,12 @@ The project ships with `opcua-tui`, a full-screen terminal dashboard built with 
 
 ### Start the TUI
 
-The TUI **requires** a `--url` argument. Attempting to launch without it will display an error:
+The TUI can start in two ways:
 
-```bash
-# ERROR: Missing required --url argument
-opcua-tui
-# Error: the following arguments are required: --url
+1. Provide connection args directly (for example `--url`), or
+2. Run with no args and choose a discovered connection profile.
 
-# CORRECT: Always provide the OPC UA server URL
-opcua-tui --url opc.tcp://localhost:4840
-```
+If you run `opcua-tui` with no args and no profiles are found, it will print guidance to create a profile in `./connections/` (or `~/.config/opcua-client/connections/`) or launch with connection args.
 
 **Examples:**
 
@@ -288,13 +265,56 @@ opcua-tui \
 
 ## Configuration
 
+### Connection Profiles (YAML)
+
+Profiles are discovered in this order:
+
+1. `./connections/`
+2. `~/.config/opcua-client/connections/`
+
+Supported file extensions: `.yaml`, `.yml`
+
+Example profile (`connections/prod.yaml`):
+
+```yaml
+url: "opc.tcp://localhost:4840"
+timeout: 30.0
+session_timeout: 60000
+request_timeout: 20000
+username: ""
+password: ""
+auth_policy: "None"
+security_mode: "None_"
+cert_file: ""
+key_file: ""
+```
+
+Usage examples:
+
+```bash
+# CLI
+opcua-client connect --connection-profile prod
+
+# CLI with explicit override (CLI args win)
+opcua-client config --connection-profile prod --timeout 10 --action show
+
+# TUI with profile
+opcua-tui --connection-profile prod
+
+# TUI with no args (interactive picker)
+opcua-tui
+```
+
+Precedence rule: **explicit CLI args override profile values**.
+
 ### Command-Line Arguments
 
-All commands, including the TUI, require the `--url` argument:
+Commands can use either direct connection args (for example `--url`) or `--connection-profile`:
 
 | Argument | CLI | TUI | Required | Description |
 |----------|-----|-----|----------|-------------|
-| `--url` | ✅ | ✅ | **YES** | OPC UA endpoint URL (e.g., `opc.tcp://server:4840`) |
+| `--connection-profile` | ✅ | ✅ | No | Profile name loaded from `connections/` directories |
+| `--url` | ✅ | ✅ | Conditionally | OPC UA endpoint URL (e.g., `opc.tcp://server:4840`) |
 | `--timeout` | ✅ | ✅ | No | Socket timeout in seconds (default: 30) |
 | `--username` | ✅ | ✅ | No | Username for user/password authentication |
 | `--password` | ✅ | ✅ | No | Password for user/password authentication |
@@ -432,6 +452,30 @@ Options:
   --help                        Show this help message
 ```
 
+#### `opcua-client list-profiles`
+
+List all available connection profiles discovered in `./connections/` and `~/.config/opcua-client/connections/`.
+
+```bash
+opcua-client list-profiles
+
+Output:
+Available connection profiles:
+  - prod
+  - dev
+  - staging
+```
+
+Usage example:
+
+```bash
+# List profiles
+opcua-client list-profiles
+
+# Use a listed profile with another command
+opcua-client config --connection-profile prod --action show
+```
+
 For the latest command details:
 
 ```bash
@@ -527,79 +571,6 @@ tests/integration/test_server_connection.py::test_live_server SKIPPED [ 100%]
 ========================== 4 passed, 1 skipped in 2.34s ==========================
 ```
 
-## CI/CD
-
-### Build Status
-
-[![Build Status](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/workflows/CI/badge.svg)](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/actions)
-[![Python Tests](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/workflows/tests.yml/badge.svg)](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/actions/workflows/tests.yml)
-[![Code Quality](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/workflows/lint.yml/badge.svg)](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/actions/workflows/lint.yml)
-
-### GitHub Actions Workflow
-
-Below is a sample CI/CD workflow (`.github/workflows/ci.yml`):
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [ main, develop ]
-  pull_request:
-    branches: [ main, develop ]
-
-jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ ubuntu-latest, macos-latest, windows-latest ]
-        python-version: [ '3.12', '3.13' ]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install UV
-      run: |
-        pip install uv
-
-    - name: Sync dependencies
-      run: |
-        uv sync
-
-    - name: Lint with ruff
-      run: |
-        uv run ruff check .
-
-    - name: Run tests
-      run: |
-        uv run pytest tests/ -v --cov=opcua_client
-
-    - name: Upload coverage
-      uses: codecov/codecov-action@v3
-      with:
-        files: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-```
-
-### Local CI Simulation
-
-Run locally before pushing:
-
-```bash
-# Run all checks (lint + tests)
-uv run ruff check .
-uv run pytest tests/ --cov=opcua_client
-
-# Format code
-uv run ruff format .
-```
 
 ## Contributing
 
@@ -705,16 +676,8 @@ uv run pytest tests/ --cov=opcua_client --cov-report=term-missing
 
 This project is licensed under the **{{LICENSE_NAME}}** License – see the [LICENSE](./LICENSE) file for details.
 
-**In short:** [Brief summary of license permissions and restrictions. Example: "You are free to use, modify, and distribute this software in personal and commercial projects."]
 
 ## Support & Contact
-
-### Getting Help
-
-- **Documentation:** See [docs/](./docs/) directory for detailed guides
-- **API Reference:** Run `opcua-client --help` or `opcua-tui --help`
-- **Issue Tracker:** [GitHub Issues](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/discussions) for questions
 
 ### Reporting Bugs
 
@@ -731,20 +694,6 @@ Please report bugs on [GitHub Issues](https://github.com/{{GITHUB_ORG}}/{{GITHUB
 
 Submit feature requests as [GitHub Issues](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/issues) with the `enhancement` label.
 
-### Contact
-
-- **Maintainers:** [{{MAINTAINER_EMAIL}}](mailto:{{MAINTAINER_EMAIL}})
-- **Repository:** [github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}})
-- **Issues & Questions:** [GitHub Issues](https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}/issues)
-
-### Community
-
-- Join the community discussions
-- Share your use cases and projects
-- Help answer questions from other users
-
----
-
 ## Additional Resources
 
 - [OPC UA Specification](https://opcfoundation.org/developer-tools/specifications-unified-architecture/)
@@ -752,7 +701,3 @@ Submit feature requests as [GitHub Issues](https://github.com/{{GITHUB_ORG}}/{{G
 - [Textual Documentation](https://textual.textualize.io/)
 - [Keep a Changelog](https://keepachangelog.com/)
 - [Conventional Commits](https://www.conventionalcommits.org/)
-
----
-
-**Made with ❤️ by the OPC UA Client community**

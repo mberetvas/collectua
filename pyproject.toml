@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "asyncua>=1.1.8",
+    "pyyaml>=6.0",
     "textual>=0.87.1",
 ]
 
@@ -16,3 +17,8 @@ opcua-tui = "opcua_client.tui:main"
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

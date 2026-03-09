@@ -1,0 +1,10 @@
+url: "opc.tcp://10.205.139.4:4840"
+timeout: 30.0
+session_timeout: 60000
+request_timeout: 20000
+username: ""
+password: ""
+auth_policy: "None"
+security_mode: "None_"
+cert_file: ""
+key_file: ""

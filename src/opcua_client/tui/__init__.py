@@ -1,5 +1,7 @@
 import argparse
+import sys
 
+from opcua_client.profile_loader import list_profiles, load_profile
 from opcua_client.runtime_config import RuntimeConfig
 
 from .app import OpcuaTuiApp
@@ -19,26 +21,31 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--debug-log-dir", default="logs/debug", help="Directory for debug log files")
 
-    parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
-    parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
-    parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
-    parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")
-    parser.add_argument("--username", default="", help="Username for user/password auth")
-    parser.add_argument("--password", default="", help="Password for user/password auth")
+    parser.add_argument(
+        "--connection-profile",
+        default=None,
+        help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+    )
+    parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
+    parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
+    parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
+    parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
+    parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
+    parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
     parser.add_argument(
         "--auth-policy",
-        default="None",
+        default=argparse.SUPPRESS,
         choices=["None", "Basic128Rsa15", "Basic256", "Basic256Sha256"],
         help="Security policy",
     )
     parser.add_argument(
         "--security-mode",
-        default="None_",
+        default=argparse.SUPPRESS,
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    parser.add_argument("--cert-file", default="", help="Client certificate path")
-    parser.add_argument("--key-file", default="", help="Client private key path")
+    parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
+    parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
 
     parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
     parser.add_argument(
@@ -55,10 +62,54 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _choose_profile_name(profiles: list[str]) -> str | None:
+    print("Available connection profiles:")
+    for idx, name in enumerate(profiles, start=1):
+        print(f"  {idx}. {name}")
+    print("Select a profile number (or 'q' to cancel): ", end="", flush=True)
+
+    while True:
+        value = input().strip()
+        if value.lower() in {"q", "quit", "exit"}:
+            return None
+        if value.isdigit():
+            selected = int(value)
+            if 1 <= selected <= len(profiles):
+                return profiles[selected - 1]
+        print("Invalid selection. Enter a number from the list, or 'q' to cancel: ", end="", flush=True)
+
+
 def main(argv=None) -> int:
     parser = _build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    args = parser.parse_args(raw_argv)
     args.command = "tui"
+
+    if not raw_argv and not getattr(args, "connection_profile", None):
+        profiles = list_profiles()
+        if not profiles:
+            print(
+                "No connection profiles available. Create one in ./connections/ or "
+                "~/.config/opcua-client/connections/, or launch opcua-tui with connection args."
+            )
+            return 2
+        selected_profile = _choose_profile_name(profiles)
+        if not selected_profile:
+            print("No profile selected. Exiting.")
+            return 2
+        args.connection_profile = selected_profile
+
+    profile_name = getattr(args, "connection_profile", None)
+    if profile_name:
+        try:
+            profile_values = load_profile(profile_name)
+        except (FileNotFoundError, ValueError) as exc:
+            print(f"[profile error] {exc}")
+            return 2
+
+        for key, value in profile_values.items():
+            if not hasattr(args, key):
+                setattr(args, key, value)
 
     config = RuntimeConfig.from_namespace(args)
     errors = config.validate()

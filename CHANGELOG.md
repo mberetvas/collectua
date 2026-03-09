@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-03-09
+
+### Added
+- **Connection profiles (YAML)** - Reusable configuration files for OPC UA connections
+  - Store profiles in `./connections/` or `~/.config/opcua-client/connections/`
+  - Flat YAML schema matching `ConnectionConfig` fields (url, timeout, username, password, auth_policy, security_mode, cert_file, key_file)
+  - Profile discovery searches repo-local then user config directory
+  - Strict key validation with helpful error messages for unknown fields
+- **`--connection-profile` flag** - Use a named profile with any CLI command or TUI
+  - `opcua-client config --connection-profile prod --action show`
+  - `opcua-tui --connection-profile staging`
+  - Explicit CLI args override profile values (deterministic precedence)
+- **`opcua-client list-profiles` command** - Display available connection profiles
+  - Lists all discovered profiles by name
+  - Useful for automation and script workflows
+- **TUI no-args default behavior** - Interactive profile selection on startup
+  - Running `opcua-tui` with no arguments now prompts user to choose a profile
+  - If no profiles are found, provides clear guidance to create one or use CLI args
+  - Makes TUI more user-friendly for repeated connections
+- **Sample profile** - `connections/example.yaml` included in repository
+  - Provides template for users to create their own profiles
+
+### Changed
+- TUI no longer requires `--url` when connection profiles are available
+  - `opcua-tui` with no args now launches interactive profile picker
+  - `opcua-tui --url opc.tcp://server:4840` still works (explicit args always honored)
+
+## [0.1.0] - 2026-03-06
+
 ### Changed
 - **BREAKING: OPC UA URL is now required** for all CLI commands and TUI
   - `--url` argument changed from optional (with hardcoded default) to **required**
