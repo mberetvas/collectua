@@ -6,11 +6,11 @@ import logging
 import os
 import socket
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Dict, Mapping, Optional
 
-from asyncua import Client, ua
+from asyncua import Client, NodeId, ua
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -35,10 +35,30 @@ CSV_HEADERS = [
     "severity",
     "condition_name",
     "event_id",
+    "condition_id",
+    "retain",
+    "active_state",
+    "acked_state",
     "raw",
 ]
 
 _logger = logging.getLogger("tui")
+
+
+@dataclass(frozen=True)
+class ActiveAlarm:
+    """In-memory snapshot of an active alarm/condition keyed by ConditionId."""
+
+    condition_id: str
+    condition_name: str
+    source_name: str
+    message: str
+    severity: str
+    timestamp_utc: str
+    retain: Optional[bool]
+    active_state: Optional[bool]
+    acked_state: Optional[bool]
+    raw: str
 
 
 class HelpScreen(ModalScreen[None]):
@@ -102,12 +122,78 @@ class TuiAlarmHandler:
         self.csv_path = csv_path
         self.app = app
         self._ensure_csv_header()
+        self._active_alarms: Dict[str, ActiveAlarm] = {}
 
     def _ensure_csv_header(self) -> None:
         if not os.path.exists(self.csv_path):
             with open(self.csv_path, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(CSV_HEADERS)
+
+    @staticmethod
+    def _condition_id_from_event(event) -> Optional[str]:
+        value = getattr(event, "ConditionId", None)
+        if value is None:
+            return None
+        if isinstance(value, NodeId):
+            return value.to_string()
+        to_string = getattr(value, "to_string", None)
+        if callable(to_string):
+            return to_string()
+        return str(value)
+
+    @staticmethod
+    def _bool_from_state(state) -> Optional[bool]:
+        if state is None:
+            return None
+        try:
+            inner = getattr(state, "Id", state)
+        except Exception:
+            inner = state
+        try:
+            return bool(inner)
+        except Exception:
+            return None
+
+    def _update_active_alarms(self, row: Mapping[str, Any]) -> None:
+        condition_id = row.get("condition_id")
+        if not condition_id:
+            return
+
+        retain = row.get("retain")
+        active_state = row.get("active_state")
+        acked_state = row.get("acked_state")
+
+        if isinstance(retain, str):
+            retain_normalized: Optional[bool] = retain.lower() == "true"
+        else:
+            retain_normalized = bool(retain) if retain is not None else None
+
+        active_alarm = ActiveAlarm(
+            condition_id=condition_id,
+            condition_name=str(row.get("condition_name", "")),
+            source_name=str(row.get("source_name", "")),
+            message=str(row.get("message", "")),
+            severity=str(row.get("severity", "")),
+            timestamp_utc=str(row.get("timestamp_utc", "")),
+            retain=retain_normalized,
+            active_state=bool(active_state) if active_state is not None else None,
+            acked_state=bool(acked_state) if acked_state is not None else None,
+            raw=str(row.get("raw", "")),
+        )
+
+        if retain_normalized is False:
+            if condition_id in self._active_alarms:
+                _logger.debug("Clearing active alarm for ConditionId=%s", condition_id)
+                self._active_alarms.pop(condition_id, None)
+            return
+
+        _logger.debug("Upserting active alarm for ConditionId=%s", condition_id)
+        self._active_alarms[condition_id] = active_alarm
+
+    def get_active_alarms(self) -> Mapping[str, ActiveAlarm]:
+        """Return a read-only view of the currently active alarms."""
+        return dict(self._active_alarms)
 
     def event_notification(self, event) -> None:
         try:
@@ -120,8 +206,14 @@ class TuiAlarmHandler:
                 "severity": str(getattr(event, "Severity", "")),
                 "condition_name": str(getattr(event, "ConditionName", "")),
                 "event_id": str(getattr(event, "EventId", "")),
+                "condition_id": self._condition_id_from_event(event),
+                "retain": getattr(event, "Retain", None),
+                "active_state": self._bool_from_state(getattr(event, "ActiveState", None)),
+                "acked_state": self._bool_from_state(getattr(event, "AckedState", None)),
                 "raw": str(event),
             }
+
+            self._update_active_alarms(row)
 
             with open(self.csv_path, "a", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
