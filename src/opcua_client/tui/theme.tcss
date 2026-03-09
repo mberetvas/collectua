@@ -82,3 +82,55 @@ Footer {
     padding: 1 2;
     content-align: center middle;
 }
+
+/* ── Tabbed alarm panel ──────────────────────────────────── */
+
+#tabbed-panel {
+    height: 1fr;
+    border: round #3b4261;
+    background: #161925;
+    padding: 0;
+    margin-bottom: 1;
+}
+
+/* Override shared border/margin for alarm-table inside the tab */
+#alarm-table {
+    border: none;
+    margin-bottom: 0;
+    padding: 0 1;
+}
+
+/* Node info panel inside the tab */
+#node-info-content {
+    height: 1fr;
+    padding: 1 2;
+    background: #161925;
+    color: #d7dce2;
+    border: none;
+    margin-bottom: 0;
+}
+
+/* Tab bar theming */
+#tabbed-panel Tabs {
+    background: #1b2333;
+    border-bottom: solid #3b4261;
+}
+
+#tabbed-panel Tab {
+    color: #9ece6a;
+}
+
+#tabbed-panel Tab.-active {
+    color: #86e1fc;
+    text-style: bold;
+}
+
+#tabbed-panel ContentSwitcher {
+    height: 1fr;
+}
+
+#tab-alarms,
+#tab-node-info {
+    height: 1fr;
+    padding: 0;
+}

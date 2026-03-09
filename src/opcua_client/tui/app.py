@@ -16,7 +16,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from opcua_client.runtime_config import RuntimeConfig
 
@@ -24,6 +24,7 @@ from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
 from .widgets.connection_status import ConnectionStatusWidget
 from .widgets.log_stream import TuiLogHandler
+from .widgets.node_info_panel import NodeInfoPanelWidget
 from .widgets.node_tree import NodeTreeWidget
 
 CSV_HEADERS = [
@@ -50,6 +51,7 @@ class HelpScreen(ModalScreen[None]):
                     "[b]OPC UA TUI Help[/b]",
                     "",
                     "Tab: Focus next panel",
+                    "F6: Toggle Alarms / Node Info tab",
                     "F1: Help",
                     "F5: Reconnect",
                     "F9: Toggle config panel",
@@ -84,6 +86,12 @@ class NodeTreeData(Message):
     def __init__(self, tree_data: dict[str, Any]) -> None:
         super().__init__()
         self.tree_data = tree_data
+
+
+class NodeSelected(Message):
+    def __init__(self, node_data: dict[str, Any]) -> None:
+        super().__init__()
+        self.node_data = node_data
 
 
 class TuiAlarmHandler:
@@ -133,6 +141,8 @@ class OpcuaTuiApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("f10", "quit", "Quit"),
         Binding("f5", "reconnect", "Reconnect"),
+        Binding("f6", "toggle_main_tab", "Toggle Main Tab"),
+        Binding("shift+f6", "show_alarm_tab", "Show Alarms"),
         Binding("f1", "help", "Help"),
         Binding("f9", "toggle_config", "Toggle Config"),
         Binding("tab", "focus_next_panel", "Next Panel"),
@@ -144,8 +154,10 @@ class OpcuaTuiApp(App[None]):
         self._client: Client | None = None
         self._subscription = None
         self._runner_task: asyncio.Task | None = None
+        self._node_value_task: asyncio.Task | None = None
         self._shutdown_requested = False
         self._log_handler: TuiLogHandler | None = None
+        self._selected_node: dict[str, Any] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -155,7 +167,11 @@ class OpcuaTuiApp(App[None]):
                 yield NodeTreeWidget(id="node-tree")
                 yield ConfigPanel(id="config-panel")
             with Vertical(id="right-column"):
-                yield AlarmTableWidget(id="alarm-table")
+                with TabbedContent(id="tabbed-panel"):
+                    with TabPane("Live Alarms", id="tab-alarms"):
+                        yield AlarmTableWidget(id="alarm-table")
+                    with TabPane("Node Info", id="tab-node-info"):
+                        yield NodeInfoPanelWidget(id="node-info-content")
                 yield Static("Logs", classes="panel-title")
                 from .widgets.log_stream import LogStreamWidget
 
@@ -214,6 +230,16 @@ class OpcuaTuiApp(App[None]):
                 await self._cleanup_client()
 
     async def _cleanup_client(self) -> None:
+        if self._node_value_task and not self._node_value_task.done():
+            self._node_value_task.cancel()
+            try:
+                await self._node_value_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+        self._node_value_task = None
+
         try:
             if self._subscription:
                 await self._subscription.delete()
@@ -295,6 +321,66 @@ class OpcuaTuiApp(App[None]):
     def on_node_tree_data(self, message: NodeTreeData) -> None:
         self.query_one(NodeTreeWidget).set_tree_data(message.tree_data)
 
+    def on_tree_node_selected(self, event) -> None:
+        if event.node.data:
+            node_data = event.node.data
+            self._selected_node = node_data
+
+            panel = self.query_one(NodeInfoPanelWidget)
+            node_class = str(node_data.get("cls", ""))
+
+            if node_class == "Variable":
+                panel.display_node(node_data, value_text="[yellow]Loading...[/yellow]")
+                if self._node_value_task and not self._node_value_task.done():
+                    self._node_value_task.cancel()
+                self._node_value_task = asyncio.create_task(self._read_selected_node_value(node_data))
+            else:
+                panel.display_node(
+                    node_data,
+                    value_text="[dim]N/A (not a variable node)[/dim]",
+                )
+
+    async def _read_selected_node_value(self, node_data: dict[str, Any]) -> None:
+        node_id = str(node_data.get("id", ""))
+        if not node_id:
+            return
+
+        try:
+            if not self._client:
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text="[red]Unavailable[/red]",
+                    value_status="Disconnected from server",
+                )
+                return
+
+            node = self._client.get_node(node_id)
+            value = await node.read_value()
+
+            # Skip stale updates if user has selected a different node meanwhile.
+            if not self._selected_node or self._selected_node.get("id") != node_id:
+                return
+
+            value_rendered = str(value)
+            if len(value_rendered) > 160:
+                value_rendered = f"{value_rendered[:157]}..."
+
+            self.query_one(NodeInfoPanelWidget).display_node(
+                node_data,
+                value_text=f"[bold #9ece6a]{value_rendered}[/bold #9ece6a]",
+                value_status=f"Read at {datetime.now().strftime('%H:%M:%S')}",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Keep node metadata visible even when value read fails.
+            if self._selected_node and self._selected_node.get("id") == node_id:
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text="[red]Read failed[/red]",
+                    value_status=str(exc),
+                )
+
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
@@ -315,6 +401,13 @@ class OpcuaTuiApp(App[None]):
 
     def action_focus_next_panel(self) -> None:
         self.screen.focus_next()
+
+    def action_toggle_main_tab(self) -> None:
+        tabbed = self.query_one("#tabbed-panel", TabbedContent)
+        tabbed.active = "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
+
+    def action_show_alarm_tab(self) -> None:
+        self.query_one("#tabbed-panel", TabbedContent).active = "tab-alarms"
 
     async def action_quit(self) -> None:
         self._shutdown_requested = True
