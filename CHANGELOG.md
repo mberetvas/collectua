@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: TUI launch method changed** - Use `opcua-client --tui` instead of separate `opcua-tui` command
+  - The `opcua-tui` command has been removed as a separate entry point
+  - Instead, use `opcua-client --tui` to launch the terminal dashboard
+  - All TUI flags and options remain the same: `opcua-client --tui --url opc.tcp://server:4840`
+  - `opcua-client --tui` and `opcua-client [subcommand]` are mutually exclusive
+  - Simplifies the CLI surface and reduces code duplication
+  - Shell alias example: `alias opcua-tui='opcua-client --tui'` for legacy compatibility
+
 ## [0.1.1] - 2026-03-09
 
 ### Added

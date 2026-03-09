@@ -126,8 +126,51 @@ def _build_parser() -> argparse.ArgumentParser:
         default="logs/debug",
         help="Directory for debug log files (only used in debug mode)",
     )
+    parser.add_argument(
+        "--tui",
+        action="store_true",
+        help="Launch TUI dashboard (conflicts with subcommands)",
+    )
 
-    subparsers = parser.add_subparsers(dest="command")
+    # Connection and TUI arguments available at top level for --tui flag
+    parser.add_argument(
+        "--connection-profile",
+        default=None,
+        help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+    )
+    parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
+    parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
+    parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
+    parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
+    parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
+    parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
+    parser.add_argument(
+        "--auth-policy",
+        default=argparse.SUPPRESS,
+        choices=["None", "Basic128Rsa15", "Basic256", "Basic256Sha256"],
+        help="Security policy",
+    )
+    parser.add_argument(
+        "--security-mode",
+        default=argparse.SUPPRESS,
+        choices=["None_", "Sign", "SignAndEncrypt"],
+        help="Security mode",
+    )
+    parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
+    parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
+    parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
+    parser.add_argument(
+        "--target-namespace",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Optional namespace index filter (space-separated). Empty means all namespaces.",
+    )
+    parser.add_argument("--csv-file", default="alarms.csv", help="Output CSV file path")
+    parser.add_argument("--publish-interval-ms", type=int, default=500, help="Subscription publish interval")
+    parser.add_argument("--reconnect-delay-sec", type=int, default=5, help="Reconnect delay in seconds")
+
+    subparsers = parser.add_subparsers(dest="command", required=False)
 
     def _add_connection_profile_arg(subparser: argparse.ArgumentParser) -> None:
         subparser.add_argument(
@@ -267,6 +310,66 @@ def main(argv=None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
+    # Handle --tui flag
+    if args.tui:
+        if args.command:
+            parser.error("--tui cannot be used with subcommands")
+        # Import TUI app here to avoid circular imports and keep TUI optional
+        from .tui.app import OpcuaTuiApp
+
+        args.command = "tui"
+
+        # Interactive profile selection if no connection args provided
+        if not any(getattr(args, attr, None) for attr in ["url", "connection_profile"]):
+            profiles = list_profiles()
+            if not profiles:
+                print(
+                    "No connection profiles available. Create one in ./connections/ or "
+                    "~/.config/opcua-client/connections/, or launch opcua-client with connection args."
+                )
+                return 2
+            # Use TUI profile chooser function
+            from .tui import _choose_profile_name
+
+            selected_profile = _choose_profile_name(profiles)
+            if not selected_profile:
+                print("No profile selected. Exiting.")
+                return 2
+            args.connection_profile = selected_profile
+
+        # Load profile if specified
+        profile_name = getattr(args, "connection_profile", None)
+        if profile_name:
+            try:
+                profile_values = load_profile(profile_name)
+            except (FileNotFoundError, ValueError) as exc:
+                print(f"[profile error] {exc}")
+                return 2
+
+            for key, value in profile_values.items():
+                if not hasattr(args, key):
+                    setattr(args, key, value)
+
+        # Build and validate config
+        config = RuntimeConfig.from_namespace(args)
+        errors = config.validate()
+        if errors:
+            for error in errors:
+                print(f"[config error] {error}")
+            return 2
+
+        # Configure logging
+        debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir)
+        if debug_log_file:
+            logger = logging.getLogger("cli")
+            logger.info(f"Debug log: {debug_log_file}")
+
+        # Launch TUI
+        app = OpcuaTuiApp(config)
+        app.run()
+        return 0
+
+    # Handle standard commands
     if not args.command:
         parser.print_help()
         return 0
