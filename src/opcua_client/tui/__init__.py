@@ -19,7 +19,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--debug-log-dir", default="logs/debug", help="Directory for debug log files")
 
-    parser.add_argument("--url", default="opc.tcp://10.205.139.4:4840", help="OPC UA endpoint URL")
+    parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
     parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
     parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
     parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")

@@ -50,7 +50,7 @@ class RuntimeConfig:
             mode=getattr(args, "mode", "prod"),
             debug_log_dir=getattr(args, "debug_log_dir", "logs/debug"),
             connection=ConnectionConfig(
-                url=getattr(args, "url", "opc.tcp://10.205.139.4:4840"),
+                url=getattr(args, "url"),
                 timeout=float(getattr(args, "timeout", 30.0)),
                 session_timeout=int(getattr(args, "session_timeout", 60000)),
                 request_timeout=int(getattr(args, "request_timeout", 20000)),

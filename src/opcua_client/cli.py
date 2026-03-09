@@ -129,7 +129,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     browse_parser = subparsers.add_parser("browse", help="Browse OPC UA node tree")
-    browse_parser.add_argument("--url", default=browse.ENDPOINT, help="OPC UA endpoint URL")
+    browse_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
     browse_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     browse_parser.add_argument(
         "--target-namespace",
@@ -141,7 +141,7 @@ def _build_parser() -> argparse.ArgumentParser:
     browse_parser.add_argument("--timeout", type=float, default=browse.TIMEOUT, help="Socket timeout (seconds)")
 
     collect_parser = subparsers.add_parser("collect", help="Subscribe to alarms/events and write CSV")
-    collect_parser.add_argument("--url", default=collector.ENDPOINT, help="OPC UA endpoint URL")
+    collect_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
     collect_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
     collect_parser.add_argument(
         "--publish-interval-ms",
@@ -163,7 +163,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     connect_parser = subparsers.add_parser("connect", help="Connection smoke test (supports secure/insecure)")
-    connect_parser.add_argument("--url", default="opc.tcp://10.205.139.4:4840", help="OPC UA endpoint URL")
+    connect_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
     connect_parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
     connect_parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
     connect_parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")
@@ -185,7 +185,7 @@ def _build_parser() -> argparse.ArgumentParser:
     connect_parser.add_argument("--key-file", default="", help="Client private key path")
 
     config_parser = subparsers.add_parser("config", help="Show or validate normalized runtime configuration")
-    config_parser.add_argument("--url", default="opc.tcp://10.205.139.4:4840", help="OPC UA endpoint URL")
+    config_parser.add_argument("--url", required=True, help="OPC UA endpoint URL")
     config_parser.add_argument("--timeout", type=float, default=30.0, help="Socket timeout (seconds)")
     config_parser.add_argument("--session-timeout", type=int, default=60000, help="Session timeout (milliseconds)")
     config_parser.add_argument("--request-timeout", type=int, default=20000, help="Request timeout (milliseconds)")

@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from asyncua import Client, ua
 
 # ──────────────────────── CONFIG ────────────────────────
-ENDPOINT = "opc.tcp://10.205.139.4:4840"
 CSV_FILE = "alarms.csv"
 PUBLISH_INTERVAL_MS = 500
 RECONNECT_DELAY_SEC = 5
@@ -113,7 +112,7 @@ async def subscribe(client: Client, handler: AlarmHandler, publish_interval_ms: 
 
 
 async def run(
-    endpoint: str = ENDPOINT,
+    endpoint: str,
     csv_file: str = CSV_FILE,
     publish_interval_ms: int = PUBLISH_INTERVAL_MS,
     reconnect_delay_sec: int = RECONNECT_DELAY_SEC,

@@ -8,7 +8,6 @@ import logging
 
 from asyncua import Client, ua
 
-ENDPOINT = "opc.tcp://10.205.139.4:4840"
 MAX_DEPTH = 3
 TIMEOUT = 30.0
 
@@ -48,7 +47,7 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
 
 
 async def run(
-    endpoint: str = ENDPOINT,
+    endpoint: str,
     max_depth: int = MAX_DEPTH,
     target_namespaces: list[int] | None = None,
     timeout: float = TIMEOUT,
