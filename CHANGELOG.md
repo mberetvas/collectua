@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: OPC UA URL is now required** for all CLI commands and TUI
+  - `--url` argument changed from optional (with hardcoded default) to **required**
+  - Affects all commands: `browse`, `collect`, `connect`, `config`, and `opcua-tui`
+  - Removed hardcoded endpoint defaults (`opc.tcp://10.205.139.4:4840`) from codebase
+  - Improves security by preventing accidental connections to unintended servers
+
 ## [0.1.0] - 2026-03-06
 
 ### Added

@@ -161,20 +161,25 @@ opcua-tui --help
 
 ## Quickstart
 
+### ⚠️ Important: OPC UA URL is Required
+
+All commands require an explicit `--url` argument pointing to your OPC UA server. There are no hardcoded defaults for security and correctness reasons.
+
+```bash
+# Format: opc.tcp://hostname:port
+export OPC_URL="opc.tcp://your-server.example.com:4840"
+```
+
 ### Basic Connection Test
 
 Test connectivity to an OPC UA server:
 
 ```bash
 # Using UV (recommended)
-uv run opcua-client connect \
-  --server-url opc.tcp://localhost:4840 \
-  --protocol SECURE_CERTIFICATE
+uv run opcua-client connect --url opc.tcp://localhost:4840
 
 # Or using installed package
-opcua-client connect \
-  --server-url opc.tcp://localhost:4840 \
-  --protocol SECURE_CERTIFICATE
+opcua-client connect --url opc.tcp://localhost:4840
 ```
 
 ### Browse OPC UA Node Tree
@@ -182,10 +187,15 @@ opcua-client connect \
 ```bash
 # Browse server nodes starting from root
 opcua-client browse \
-  --server-url opc.tcp://localhost:4840 \
-  --depth 3 \
+  --url opc.tcp://localhost:4840 \
+  --max-depth 3
+
+# With authentication
+opcua-client browse \
+  --url opc.tcp://localhost:4840 \
   --username admin \
-  --password secret123
+  --password secret123 \
+  --max-depth 4
 ```
 
 ### Collect Alarms to CSV
@@ -193,10 +203,8 @@ opcua-client browse \
 ```bash
 # Subscribe to alarms and export to CSV
 opcua-client collect \
-  --server-url opc.tcp://localhost:4840 \
-  --output-file alarms.csv \
-  --interval-ms 5000 \
-  --timeout-sec 60
+  --url opc.tcp://localhost:4840 \
+  --csv-file alarms.csv
 ```
 
 ### Interactive TUI Mode
@@ -220,6 +228,19 @@ The project ships with `opcua-tui`, a full-screen terminal dashboard built with 
 - **Runtime config panel** with sensitive values such as passwords masked
 
 ### Start the TUI
+
+The TUI **requires** a `--url` argument. Attempting to launch without it will display an error:
+
+```bash
+# ERROR: Missing required --url argument
+opcua-tui
+# Error: the following arguments are required: --url
+
+# CORRECT: Always provide the OPC UA server URL
+opcua-tui --url opc.tcp://localhost:4840
+```
+
+**Examples:**
 
 ```bash
 # Basic launch
@@ -267,30 +288,40 @@ opcua-tui \
 
 ## Configuration
 
-### Environment Variables
+### Command-Line Arguments
 
-Configure behavior via environment variables:
+All commands, including the TUI, require the `--url` argument:
+
+| Argument | CLI | TUI | Required | Description |
+|----------|-----|-----|----------|-------------|
+| `--url` | ✅ | ✅ | **YES** | OPC UA endpoint URL (e.g., `opc.tcp://server:4840`) |
+| `--timeout` | ✅ | ✅ | No | Socket timeout in seconds (default: 30) |
+| `--username` | ✅ | ✅ | No | Username for user/password authentication |
+| `--password` | ✅ | ✅ | No | Password for user/password authentication |
+| `--auth-policy` | ✅ | ✅ | No | Security policy: `None`, `Basic128Rsa15`, `Basic256`, `Basic256Sha256` (default: `None`) |
+| `--security-mode` | ✅ | ✅ | No | Security mode: `None_`, `Sign`, `SignAndEncrypt` (default: `None_`) |
+| `--cert-file` | ✅ | ✅ | No | Path to client certificate for secure connections |
+| `--key-file` | ✅ | ✅ | No | Path to client private key for secure connections |
+| `--max-depth` | ✅ | ✅ | No | Maximum depth for node tree browsing (default: 3) |
+| `--target-namespace` | ✅ | ✅ | No | Namespace index filter for browsing (space-separated) |
+| `--csv-file` | ✅ (collect) | ✅ | No | Output CSV file path for alarm collection (default: `alarms.csv`) |
+| `--mode` | ✅ | ✅ | No | Runtime mode: `prod`, `debug` (default: `prod`) |
+| `--log-level` | ✅ | ✅ | No | Console logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `INFO`) |
+
+### Creating Shell Aliases (Optional)
+
+For convenience, create aliases to avoid typing the URL repeatedly:
 
 ```bash
-# Logging and Runtime
-export OPCUA_CLIENT_LOG_LEVEL=DEBUG           # DEBUG, INFO, WARNING, ERROR
-export OPCUA_CLIENT_MODE=debug                # debug or production
-export OPCUA_CLIENT_LOG_DIR=./logs           # Directory for debug logs
+# Add to ~/.bashrc or ~/.zshrc
+alias opcua-prod='opcua-client --url opc.tcp://prod-server.internal:4840'
+alias opcua-dev='opcua-client --url opc.tcp://dev-server.internal:4840'
+alias opcua-tui-prod='opcua-tui --url opc.tcp://prod-server.internal:4840'
 
-# Server Connection Defaults
-export OPCUA_SERVER_URL=opc.tcp://localhost:4840
-export OPCUA_CONNECTION_TIMEOUT=30            # seconds
-export OPCUA_REQUEST_TIMEOUT=10               # seconds
-
-# Authentication Defaults
-export OPCUA_USERNAME=admin
-export OPCUA_PASSWORD=                        # Leave empty for no auth
-export OPCUA_CERT_PATH=./my-certs/opcua_certs/own/certs/MyOPCUAClient.der
-export OPCUA_PRIVATE_KEY_PATH=./my-certs/opcua_certs/own/private/MyOPCUAClient.pem
-
-# Export Defaults
-export OPCUA_OUTPUT_FORMAT=csv                # csv or json
-export OPCUA_OUTPUT_DIR=./exports
+# Now use:
+opcua-prod connect
+opcua-dev browse --max-depth 2
+opcua-tui-prod  # Opens TUI connected to prod server
 ```
 
 ### Example .env File
