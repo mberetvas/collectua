@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -22,6 +22,7 @@ class ConnectionConfig:
 @dataclass
 class BrowseConfig:
     max_depth: int = 3
+    target_namespaces: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -60,7 +61,10 @@ class RuntimeConfig:
                 cert_file=getattr(args, "cert_file", ""),
                 key_file=getattr(args, "key_file", ""),
             ),
-            browse=BrowseConfig(max_depth=int(getattr(args, "max_depth", 3))),
+            browse=BrowseConfig(
+                max_depth=int(getattr(args, "max_depth", 3)),
+                target_namespaces=[int(ns) for ns in getattr(args, "target_namespace", [])],
+            ),
             collect=CollectConfig(
                 csv_file=getattr(args, "csv_file", "alarms.csv"),
                 publish_interval_ms=int(getattr(args, "publish_interval_ms", 500)),
@@ -91,6 +95,11 @@ class RuntimeConfig:
 
         if self.browse.max_depth < 0:
             errors.append("max_depth must be >= 0")
+
+        for ns in self.browse.target_namespaces:
+            if ns < 0:
+                errors.append("target_namespace values must be >= 0")
+                break
 
         if self.collect.publish_interval_ms <= 0:
             errors.append("publish_interval_ms must be greater than 0")

@@ -41,6 +41,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--key-file", default="", help="Client private key path")
 
     parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
+    parser.add_argument(
+        "--target-namespace",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Optional namespace index filter (space-separated). Empty means all namespaces.",
+    )
     parser.add_argument("--csv-file", default="alarms.csv", help="Output CSV file path")
     parser.add_argument("--publish-interval-ms", type=int, default=500, help="Subscription publish interval")
     parser.add_argument("--reconnect-delay-sec", type=int, default=5, help="Reconnect delay in seconds")

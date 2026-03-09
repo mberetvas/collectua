@@ -47,9 +47,8 @@ async def browse_nodes(node: Node):
     """
     node_class = await node.read_node_class()
     children = []
-    for child in await node.get_children():
-        if await child.read_node_class() in [ua.NodeClass.Object, ua.NodeClass.Variable]:
-            children.append(await browse_nodes(child))
+    for child in await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable):
+        children.append(await browse_nodes(child))
     if node_class != ua.NodeClass.Variable:
         var_type = None
     else:

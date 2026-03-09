@@ -6,6 +6,8 @@ from textual.widgets import Tree
 
 
 class NodeTreeWidget(Tree[dict[str, Any]]):
+    PLACEHOLDER_LABEL = "⏳ Loading..."
+
     def __init__(self, *args, **kwargs):
         super().__init__("OPC UA Objects", *args, **kwargs)
 
@@ -16,13 +18,34 @@ class NodeTreeWidget(Tree[dict[str, Any]]):
         self.clear()
         self.root.label = self._fmt_label(tree_data)
         self.root.data = tree_data
-        self._add_children(self.root, tree_data.get("children", []))
+        self.add_children(self.root, tree_data.get("children", []))
         self.root.expand()
 
-    def _add_children(self, parent, children: list[dict[str, Any]]) -> None:
+    def add_children(self, parent, children: list[dict[str, Any]]) -> None:
         for child in children:
-            node = parent.add(self._fmt_label(child), data=child)
-            self._add_children(node, child.get("children", []))
+            child_items = child.get("children", [])
+            expandable = bool(child_items) or bool(child.get("expandable"))
+            allow_expand = child.get("cls") == "Object" and expandable
+            node = parent.add(self._fmt_label(child), data=child, allow_expand=allow_expand)
+            self.add_children(node, child_items)
+            if allow_expand and not child_items:
+                node.add(self.PLACEHOLDER_LABEL, data={"_placeholder": True}, allow_expand=False)
+
+    def remove_placeholder(self, tree_node) -> bool:
+        removed = False
+        for child in list(tree_node.children):
+            data = getattr(child, "data", None)
+            if isinstance(data, dict) and data.get("_placeholder"):
+                child.remove()
+                removed = True
+        return removed
+
+    def has_placeholder(self, tree_node) -> bool:
+        for child in tree_node.children:
+            data = getattr(child, "data", None)
+            if isinstance(data, dict) and data.get("_placeholder"):
+                return True
+        return False
 
     @staticmethod
     def _fmt_label(item: dict[str, Any]) -> str:

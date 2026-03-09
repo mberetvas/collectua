@@ -131,6 +131,13 @@ def _build_parser() -> argparse.ArgumentParser:
     browse_parser = subparsers.add_parser("browse", help="Browse OPC UA node tree")
     browse_parser.add_argument("--url", default=browse.ENDPOINT, help="OPC UA endpoint URL")
     browse_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
+    browse_parser.add_argument(
+        "--target-namespace",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Optional namespace index filter (space-separated). Empty means all namespaces.",
+    )
     browse_parser.add_argument("--timeout", type=float, default=browse.TIMEOUT, help="Socket timeout (seconds)")
 
     collect_parser = subparsers.add_parser("collect", help="Subscribe to alarms/events and write CSV")
@@ -199,6 +206,13 @@ def _build_parser() -> argparse.ArgumentParser:
     config_parser.add_argument("--cert-file", default="", help="Client certificate path")
     config_parser.add_argument("--key-file", default="", help="Client private key path")
     config_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
+    config_parser.add_argument(
+        "--target-namespace",
+        type=int,
+        nargs="*",
+        default=[],
+        help="Optional namespace index filter (space-separated). Empty means all namespaces.",
+    )
     config_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
     config_parser.add_argument(
         "--publish-interval-ms",
@@ -254,6 +268,7 @@ def main(argv=None) -> int:
             browse.run(
                 endpoint=config.connection.url,
                 max_depth=config.browse.max_depth,
+                target_namespaces=config.browse.target_namespaces,
                 timeout=config.connection.timeout,
             )
         )

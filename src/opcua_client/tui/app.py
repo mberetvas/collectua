@@ -259,19 +259,53 @@ class OpcuaTuiApp(App[None]):
     async def _load_node_tree(self) -> None:
         if not self._client:
             return
+        initial_max_depth = min(1, self.config.browse.max_depth)
+        target_ns = set(self.config.browse.target_namespaces)
         tree_data = await self._browse_nodes(
-            self._client.nodes.objects, depth=0, max_depth=self.config.browse.max_depth
+            self._client.nodes.objects,
+            depth=0,
+            max_depth=initial_max_depth,
+            target_namespaces=target_ns,
         )
+        if not tree_data:
+            tree_data = {
+                "id": self._client.nodes.objects.nodeid.to_string(),
+                "name": "Objects",
+                "cls": "Object",
+                "children": [],
+                "type": None,
+                "ns": 0,
+                "depth": 0,
+                "expandable": False,
+            }
         self.post_message(NodeTreeData(tree_data))
 
-    async def _browse_nodes(self, node, depth: int, max_depth: int) -> dict[str, Any]:
+    async def _browse_nodes(
+        self,
+        node,
+        depth: int,
+        max_depth: int,
+        target_namespaces: set[int],
+    ) -> dict[str, Any] | None:
+        ns_index = int(node.nodeid.NamespaceIndex)
+        is_target_namespace = not target_namespaces or ns_index in target_namespaces
+        is_bridge_namespace = ns_index == 0
+
+        if not is_target_namespace and not is_bridge_namespace:
+            return None
+
         node_class = await node.read_node_class()
         children: list[dict[str, Any]] = []
 
-        if depth < max_depth:
-            for child in await node.get_children():
-                if await child.read_node_class() in [ua.NodeClass.Object, ua.NodeClass.Variable]:
-                    children.append(await self._browse_nodes(child, depth + 1, max_depth))
+        if depth < max_depth and node_class == ua.NodeClass.Object:
+            for child in await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable):
+                child_tree = await self._browse_nodes(child, depth + 1, max_depth, target_namespaces)
+                if child_tree:
+                    children.append(child_tree)
+
+        include_node = depth == 0 or is_target_namespace or bool(children)
+        if not include_node:
+            return None
 
         if node_class != ua.NodeClass.Variable:
             var_type = None
@@ -281,13 +315,66 @@ class OpcuaTuiApp(App[None]):
             except ua.UaError:
                 var_type = None
 
+        expandable = node_class == ua.NodeClass.Object and depth < self.config.browse.max_depth and depth >= max_depth
+
         return {
             "id": node.nodeid.to_string(),
             "name": (await node.read_display_name()).Text,
             "cls": node_class.name,
             "children": children,
             "type": var_type,
+            "ns": ns_index,
+            "depth": depth,
+            "expandable": expandable,
         }
+
+    async def _fetch_child_tree_data(self, node_data: dict[str, Any]) -> list[dict[str, Any]]:
+        if not self._client:
+            return []
+
+        node_id = str(node_data.get("id", ""))
+        if not node_id:
+            return []
+
+        node = self._client.get_node(node_id)
+        parent_depth = int(node_data.get("depth", 0))
+        max_depth = min(parent_depth + 1, self.config.browse.max_depth)
+        target_ns = set(self.config.browse.target_namespaces)
+        refreshed = await self._browse_nodes(node, parent_depth, max_depth, target_ns)
+        if not refreshed:
+            return []
+        return refreshed.get("children", [])
+
+    async def on_tree_node_expanded(self, event) -> None:
+        tree_node = event.node
+        node_data = getattr(tree_node, "data", None)
+        if not isinstance(node_data, dict):
+            return
+
+        if not node_data.get("expandable"):
+            return
+
+        tree_widget = self.query_one(NodeTreeWidget)
+        if not tree_widget.has_placeholder(tree_node):
+            return
+
+        try:
+            child_nodes = await self._fetch_child_tree_data(node_data)
+        except Exception as exc:
+            _logger.exception("Failed to lazy-load node children")
+            tree_widget.remove_placeholder(tree_node)
+            tree_node.add(f"⚠ Failed to load: {exc}", data={"_load_error": True}, allow_expand=False)
+            return
+
+        tree_widget.remove_placeholder(tree_node)
+        if child_nodes:
+            tree_widget.add_children(tree_node, child_nodes)
+            node_data["children"] = child_nodes
+            tree_node.data = node_data
+        else:
+            node_data["expandable"] = False
+            tree_node.data = node_data
+            tree_node.allow_expand = False
 
     async def _run_collector_loop(self) -> None:
         if not self._client:
