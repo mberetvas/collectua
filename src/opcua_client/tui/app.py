@@ -193,6 +193,15 @@ class OpcuaTuiApp(App[None]):
         log_stream = self.query_one("#log-stream")
         self._log_handler = TuiLogHandler(log_stream)
         root_logger = logging.getLogger()
+
+        # When launched via the CLI, logging is configured with a console StreamHandler that
+        # writes to stdout/stderr. In TUI mode we want log records to appear only inside the
+        # in-app log panel, not in the terminal itself, so we remove any existing console
+        # stream handlers and rely on the TUI handler (plus any file handlers) instead.
+        for handler in list(root_logger.handlers):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                root_logger.removeHandler(handler)
+
         root_logger.addHandler(self._log_handler)
         root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
 
@@ -401,21 +410,28 @@ class OpcuaTuiApp(App[None]):
             handler=handler,
         )
         server_node = self._client.get_node(ua.ObjectIds.Server)
+        # Subscribe to both BaseEventType (general) and ConditionType (Siemens A&C alarms).
+        # where_clause_generation=False prevents asyncua from building a strict EventFilter
+        # WhereClause that Siemens S7-1500 rejects, causing silent event drops.
         await self._subscription.subscribe_events(
             sourcenode=server_node,
-            evtypes=ua.ObjectIds.ConditionType,
+            evtypes=[ua.ObjectIds.BaseEventType, ua.ObjectIds.ConditionType],
+            where_clause_generation=False,
         )
-        _logger.info("Subscribed to ConditionType alarm events")
+        _logger.info("Subscribed to BaseEventType and ConditionType events")
 
+        # ConditionRefresh requests the current active-alarm backlog from the server.
+        # Must be called on the Server Object node (i=2253), NOT on the ConditionType
+        # ObjectType node (i=2782). ConditionType is an abstract type definition — calling
+        # methods on it causes a protocol-level failure on Siemens S7-1500.
         try:
-            await self._client.call_method(
-                ua.ObjectIds.Server,
+            await server_node.call_method(
                 ua.ObjectIds.ConditionType_ConditionRefresh,
                 ua.Variant(self._subscription.subscription_id, ua.VariantType.UInt32),
             )
-            _logger.info("ConditionRefresh called — requested current alarm state")
-        except Exception:
-            _logger.warning("ConditionRefresh failed (server may not support it)", exc_info=True)
+            _logger.info("ConditionRefresh called — requested active alarm backlog")
+        except Exception as exc:
+            _logger.warning("ConditionRefresh failed: %s", exc)
 
         while not self._shutdown_requested and self._client:
             await asyncio.sleep(1)
