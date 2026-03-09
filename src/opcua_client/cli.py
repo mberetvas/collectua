@@ -9,6 +9,7 @@ from pathlib import Path
 from asyncua import Client
 
 from . import browse, collector
+from .cert_paths import ensure_client_certificates
 from .profile_loader import list_profiles, load_profile
 from .runtime_config import RuntimeConfig
 
@@ -106,8 +107,12 @@ async def _connect_smoke(config: RuntimeConfig):
 
     try:
         if conn.security_mode != "None_":
+            # If no explicit cert/key paths are provided via CLI/profile,
+            # auto-generate or resolve client certificates.
             if not conn.cert_file or not conn.key_file:
-                raise ValueError("--cert-file and --key-file are required when security mode is not None_")
+                cert_file, key_file = ensure_client_certificates()
+                conn.cert_file = cert_file
+                conn.key_file = key_file
             await client.set_security_string(
                 f"{conn.auth_policy},{conn.security_mode},{conn.cert_file},{conn.key_file}"
             )

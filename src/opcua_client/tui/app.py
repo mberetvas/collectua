@@ -20,6 +20,7 @@ from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from opcua_client.runtime_config import RuntimeConfig
 from opcua_client.condition_refresh import condition_refresh_with_retry
+from opcua_client.cert_paths import ensure_client_certificates
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
@@ -313,6 +314,11 @@ class OpcuaTuiApp(App[None]):
             client.set_password(conn.password)
 
         if conn.security_mode != "None_":
+            # Auto-generate or resolve client certificates when not explicitly configured.
+            if not conn.cert_file or not conn.key_file:
+                cert_file, key_file = ensure_client_certificates()
+                conn.cert_file = cert_file
+                conn.key_file = key_file
             await client.set_security_string(
                 f"{conn.auth_policy},{conn.security_mode},{conn.cert_file},{conn.key_file}"
             )

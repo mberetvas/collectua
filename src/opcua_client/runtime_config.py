@@ -125,12 +125,6 @@ class RuntimeConfig:
         if self.connection.request_timeout <= 0:
             errors.append("request_timeout must be greater than 0")
 
-        if self.connection.security_mode != "None_":
-            if not self.connection.cert_file:
-                errors.append("cert_file is required when security_mode is not None_")
-            if not self.connection.key_file:
-                errors.append("key_file is required when security_mode is not None_")
-
         if self.browse.max_depth < 0:
             errors.append("max_depth must be >= 0")
 

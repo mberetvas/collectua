@@ -336,6 +336,19 @@ Commands can use either direct connection args (for example `--url`) or `--conne
 | `--mode` | ✅ | ✅ | No | Runtime mode: `prod`, `debug` (default: `prod`) |
 | `--log-level` | ✅ | ✅ | No | Console logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `INFO`) |
 
+### Certificate Auto-Generation for Secure Modes
+
+When you use a secure `--security-mode` (`Sign` or `SignAndEncrypt`) and do **not** provide `--cert-file` / `--key-file` (either via CLI or connection profile), the client will:
+
+- Look for or create a `./certs/` directory under the current working directory and store:
+  - client certificate at `./certs/certs/myclient-selfsigned.der`
+  - client private key at `./certs/private/myclient.pem`
+- If `./certs/` cannot be used (for example, due to permissions), fall back to:
+  - `~/.config/opcua-client/certs/certs/myclient-selfsigned.der`
+  - `~/.config/opcua-client/certs/private/myclient.pem`
+
+Existing cert/key files in these locations are validated and **reused**; if they are missing or invalid, new self-signed client certificates are generated automatically.
+
 ### Creating Shell Aliases (Optional)
 
 For convenience, create aliases to avoid typing the URL repeatedly:
