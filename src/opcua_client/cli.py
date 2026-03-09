@@ -10,6 +10,7 @@ from asyncua import Client
 
 from . import browse, collector
 from .cert_paths import ensure_client_certificates
+from .profile_autosetup import ensure_profile_for_url_interactive
 from .profile_loader import list_profiles, load_profile
 from .runtime_config import RuntimeConfig
 
@@ -342,6 +343,20 @@ def main(argv=None) -> int:
         from .tui.app import OpcuaTuiApp
 
         args.command = "tui"
+
+        # URL-based auto-setup: when a URL is provided without an explicit profile,
+        # discover security options and create or reuse a URL-specific profile.
+        url_value = getattr(args, "url", None)
+        if url_value and not getattr(args, "connection_profile", None):
+            try:
+                profile_name = ensure_profile_for_url_interactive(url_value)
+            except RuntimeError as exc:
+                print(f"[autosetup error] {exc}")
+                return 2
+            args.connection_profile = profile_name
+            # Remove direct URL arg so profile values are authoritative.
+            if hasattr(args, "url"):
+                delattr(args, "url")
 
         # Interactive profile selection if no connection args provided
         if not any(getattr(args, attr, None) for attr in ["url", "connection_profile"]):

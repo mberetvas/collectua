@@ -12,11 +12,7 @@ from asyncua.crypto.cert_gen import (
     generate_self_signed_app_certificate,
 )
 from cryptography import x509
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    load_der_x509_certificate,
-    load_pem_private_key,
-)
+from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
 
@@ -145,7 +141,7 @@ def ensure_client_certificates() -> tuple[str, str]:
             # using cryptography in a synchronous context.
             cert_bytes = paths.cert_file.read_bytes()
             key_bytes = paths.key_file.read_bytes()
-            _ = load_der_x509_certificate(cert_bytes)
+            _ = x509.load_der_x509_certificate(cert_bytes)
             _ = load_pem_private_key(key_bytes, password=None)
         except Exception:
             _logger.exception("Existing client certificate/key invalid; regenerating")

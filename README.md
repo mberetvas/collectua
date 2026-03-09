@@ -162,7 +162,7 @@ The project includes a full-screen terminal dashboard built with Textual for liv
 
 The TUI can start in two ways:
 
-1. Provide connection args directly (for example `--url`), or
+1. Provide a URL directly with `--url` (first run will auto-create a profile for that URL), or
 2. Run with no args and choose a discovered connection profile.
 
 If you run `opcua-client --tui` with no args and no profiles are found, it will print guidance to create a profile in `./connections/` (or `~/.config/opcua-client/connections/`) or launch with connection args.
@@ -170,7 +170,10 @@ If you run `opcua-client --tui` with no args and no profiles are found, it will 
 **Examples:**
 
 ```bash
-# Basic launch
+# First-time launch for a URL (auto-discovers security modes and creates a profile)
+opcua-client --tui --url opc.tcp://localhost:4840
+
+# Subsequent launches will reuse the auto-created profile for that URL
 opcua-client --tui --url opc.tcp://localhost:4840
 
 # Debug mode with verbose logging
@@ -178,17 +181,6 @@ opcua-client --tui --mode debug --log-level DEBUG --url opc.tcp://localhost:4840
 
 # Filter browsing to specific namespace indexes
 opcua-client --tui --url opc.tcp://localhost:4840 --target-namespace 3 4 --max-depth 4
-
-# Connect with username/password auth
-opcua-client --tui --url opc.tcp://localhost:4840 --username myuser --password mypass
-
-# Connect with certificate-based security
-opcua-client --tui \
-  --url opc.tcp://localhost:4840 \
-  --auth-policy Basic256Sha256 \
-  --security-mode SignAndEncrypt \
-  --cert-file my-certs/opcua_certs/own/certs/MyOPCUAClient.der \
-  --key-file my-certs/opcua_certs/own/private/MyOPCUAClient_key.pem
 ```
 
 ### TUI keyboard shortcuts

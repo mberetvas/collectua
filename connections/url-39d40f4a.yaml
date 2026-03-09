@@ -1,0 +1,30 @@
+url: opc.tcp://localhost:50000
+timeout: 30.0
+session_timeout: 60000
+request_timeout: 20000
+username: ''
+password: ''
+auth_policy: Basic256Sha256
+security_mode: Sign
+cert_file: ''
+key_file: ''
+# Optional: Per-connection logging configuration
+# If not specified, uses global CLI settings (--log-level and --mode)
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # Defaults to the global --log-level if not specified
+  level: "DEBUG"
+
+  # File logging settings
+  file:
+    # Enable file logging for this connection (overrides global --mode setting)
+    enabled: false
+
+    # Directory where log files are written
+    # Defaults to logs/debug
+    path: "logs/debug"
+
+    # Filename pattern for log files
+    # Available format variables: {timestamp} (YYYYMMDD-HHMMSS), {pid} (process ID)
+    # Defaults to debug-{timestamp}-pid{pid}.log
+    name_pattern: "debug-{timestamp}-pid{pid}.log"
