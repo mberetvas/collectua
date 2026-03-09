@@ -13,31 +13,51 @@ from .profile_loader import list_profiles, load_profile
 from .runtime_config import RuntimeConfig
 
 
-def _configure_logging(mode: str, log_level: str, debug_log_dir: str = "logs/debug") -> str | None:
+def _configure_logging(
+    mode: str,
+    log_level: str,
+    debug_log_dir: str = "logs/debug",
+    connection_config: "ConnectionConfig | None" = None,
+) -> str | None:
     """
-    Configure logging with optional file handler for debug mode.
+    Configure logging with optional file handler for debug mode or per-connection settings.
 
     Args:
         mode: 'prod' or 'debug'
         log_level: User-specified log level (DEBUG, INFO, WARNING, ERROR)
         debug_log_dir: Directory for debug log files (only used in debug mode)
+        connection_config: Optional connection config with logging configuration
 
     Returns:
         Path to debug log file if created, else None
     """
+    from .runtime_config import ConnectionConfig
+
     # Get root logger and clear any existing handlers to avoid duplicates
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
 
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
-    # Determine console level based on mode and user override
-    if mode == "debug":
-        console_level = getattr(logging, log_level.upper(), logging.INFO)
-        file_level = logging.DEBUG
-    else:  # prod mode
-        console_level = getattr(logging, log_level.upper(), logging.INFO)
-        file_level = None
+    # Determine console level: connection config takes precedence
+    console_level_str = log_level.upper()
+    if connection_config and connection_config.logging_config:
+        console_level_str = connection_config.logging_config.level.upper()
+    console_level = getattr(logging, console_level_str, logging.INFO)
+
+    # Determine file logging settings
+    file_enabled = False
+    file_level = logging.DEBUG
+    file_dir = Path(debug_log_dir)
+    file_name_pattern = "debug-{timestamp}-pid{pid}.log"
+
+    if connection_config and connection_config.logging_config:
+        file_config = connection_config.logging_config.file
+        file_enabled = file_config.enabled
+        file_dir = Path(file_config.path)
+        file_name_pattern = file_config.name_pattern
+    elif mode == "debug":
+        file_enabled = True
 
     # Console handler (always present)
     console_handler = logging.StreamHandler()
@@ -45,17 +65,16 @@ def _configure_logging(mode: str, log_level: str, debug_log_dir: str = "logs/deb
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # File handler (debug mode only)
+    # File handler (if enabled)
     debug_log_file = None
-    if mode == "debug":
-        # Ensure debug log directory exists
-        debug_dir_path = Path(debug_log_dir)
-        debug_dir_path.mkdir(parents=True, exist_ok=True)
+    if file_enabled:
+        # Ensure log directory exists
+        file_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create unique filename: debug-YYYYMMDD-HHMMSS-pidNNNN.log
+        # Create unique filename using pattern
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         pid = os.getpid()
-        debug_log_file = debug_dir_path / f"debug-{timestamp}-pid{pid}.log"
+        debug_log_file = file_dir / file_name_pattern.format(timestamp=timestamp, pid=pid)
 
         file_handler = logging.FileHandler(debug_log_file)
         file_handler.setLevel(file_level)
@@ -63,7 +82,7 @@ def _configure_logging(mode: str, log_level: str, debug_log_dir: str = "logs/deb
         root_logger.addHandler(file_handler)
 
     # Set root logger to lowest level to allow handlers to filter
-    if mode == "debug":
+    if file_enabled:
         root_logger.setLevel(logging.DEBUG)
     else:
         root_logger.setLevel(console_level)
@@ -358,8 +377,8 @@ def main(argv=None) -> int:
                 print(f"[config error] {error}")
             return 2
 
-        # Configure logging
-        debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir)
+        # Configure logging with connection config
+        debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir, config.connection)
         if debug_log_file:
             logger = logging.getLogger("cli")
             logger.info(f"Debug log: {debug_log_file}")
@@ -404,8 +423,8 @@ def main(argv=None) -> int:
             print(f"[config error] {error}")
         return 2
 
-    # Configure logging with mode and optional debug file
-    debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir)
+    # Configure logging with connection config
+    debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir, config.connection)
     if debug_log_file:
         logger = logging.getLogger("cli")
         logger.info(f"Debug log: {debug_log_file}")

@@ -3,7 +3,7 @@ OPC UA Alarm Collector — MVP
 
 Long-running script that:
   - Connects to S1500 OPC UA server (no security)
-  - Subscribes to alarms/events (BaseEventType)
+    - Subscribes to alarms/events (ConditionType)
   - Prints to console + appends to CSV
   - Auto-reconnects if connection drops
 """
@@ -56,6 +56,7 @@ class AlarmHandler:
     def event_notification(self, event):
         """Called automatically by asyncua on each event."""
         try:
+            _logger.debug("RAW EVENT RECEIVED: %s", event)
             row = {
                 "timestamp_utc": str(getattr(event, "Time", datetime.now(timezone.utc))),
                 "event_type": str(getattr(event, "EventType", "")),
@@ -104,10 +105,19 @@ async def subscribe(client: Client, handler: AlarmHandler, publish_interval_ms: 
     server_node = client.get_node(ua.ObjectIds.Server)
     await subscription.subscribe_events(
         sourcenode=server_node,
-        evtypes=ua.ObjectIds.BaseEventType,
+        evtypes=ua.ObjectIds.ConditionType,
     )
+    try:
+        await client.call_method(
+            ua.ObjectIds.Server,
+            ua.ObjectIds.ConditionType_ConditionRefresh,
+            ua.Variant(subscription.subscription_id, ua.VariantType.UInt32),
+        )
+        _logger.info("ConditionRefresh called — requested current alarm state")
+    except Exception:
+        _logger.warning("ConditionRefresh failed (server may not support it)", exc_info=True)
 
-    _logger.info("Subscribed to alarms & events")
+    _logger.info("Subscribed to ConditionType alarms & events")
     return subscription
 
 

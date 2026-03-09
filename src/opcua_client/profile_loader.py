@@ -15,6 +15,7 @@ PROFILE_KEYS = {
     "security_mode",
     "cert_file",
     "key_file",
+    "logging",
 }
 
 

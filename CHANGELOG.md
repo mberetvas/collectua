@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Per-connection logging configuration** - Define logging behavior directly in connection YAML profiles
+  - Configure log level per connection: `logging.level: DEBUG|INFO|WARNING|ERROR|CRITICAL`
+  - Enable/disable file logging per connection: `logging.file.enabled: true|false`
+  - Customize log file path and filename pattern per connection
+  - Connection logging settings override global CLI flags (`--log-level`, `--mode`)
+  - Useful for debugging specific connections while keeping others in production mode
+  - See `connections/example.yaml` for configuration examples
+
 ### Changed
 - **BREAKING: TUI launch method changed** - Use `opcua-client --tui` instead of separate `opcua-tui` command
   - The `opcua-tui` command has been removed as a separate entry point
@@ -15,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `opcua-client --tui` and `opcua-client [subcommand]` are mutually exclusive
   - Simplifies the CLI surface and reduces code duplication
   - Shell alias example: `alias opcua-tui='opcua-client --tui'` for legacy compatibility
+
+### Fixed
+- **Siemens S7-1500 alarm/event visibility in TUI and collector**
+  - Switched alarm subscriptions from `BaseEventType` to `ConditionType` so OPC UA Alarms & Conditions events are captured correctly
+  - Added `ConditionRefresh` after subscription startup to request current active alarm state from servers that support it
+  - Added debug logging of raw incoming event payloads to simplify diagnostics when vendor-specific event fields are missing
 
 ## [0.1.1] - 2026-03-09
 

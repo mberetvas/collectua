@@ -111,6 +111,7 @@ class TuiAlarmHandler:
 
     def event_notification(self, event) -> None:
         try:
+            _logger.debug("RAW EVENT RECEIVED: %s", event)
             row = {
                 "timestamp_utc": str(getattr(event, "Time", datetime.now(timezone.utc))),
                 "event_type": str(getattr(event, "EventType", "")),
@@ -402,9 +403,19 @@ class OpcuaTuiApp(App[None]):
         server_node = self._client.get_node(ua.ObjectIds.Server)
         await self._subscription.subscribe_events(
             sourcenode=server_node,
-            evtypes=ua.ObjectIds.BaseEventType,
+            evtypes=ua.ObjectIds.ConditionType,
         )
-        _logger.info("Subscribed to BaseEventType events")
+        _logger.info("Subscribed to ConditionType alarm events")
+
+        try:
+            await self._client.call_method(
+                ua.ObjectIds.Server,
+                ua.ObjectIds.ConditionType_ConditionRefresh,
+                ua.Variant(self._subscription.subscription_id, ua.VariantType.UInt32),
+            )
+            _logger.info("ConditionRefresh called — requested current alarm state")
+        except Exception:
+            _logger.warning("ConditionRefresh failed (server may not support it)", exc_info=True)
 
         while not self._shutdown_requested and self._client:
             await asyncio.sleep(1)

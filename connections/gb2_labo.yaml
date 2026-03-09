@@ -8,3 +8,24 @@ auth_policy: "None"
 security_mode: "None_"
 cert_file: ""
 key_file: ""
+
+# Optional: Per-connection logging configuration
+# If not specified, uses global CLI settings (--log-level and --mode)
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  # Defaults to the global --log-level if not specified
+  level: "DEBUG"
+
+  # File logging settings
+  file:
+    # Enable file logging for this connection (overrides global --mode setting)
+    enabled: true
+
+    # Directory where log files are written
+    # Defaults to logs/debug
+    path: "logs/debug/gb2_labo"
+
+    # Filename pattern for log files
+    # Available format variables: {timestamp} (YYYYMMDD-HHMMSS), {pid} (process ID)
+    # Defaults to debug-{timestamp}-pid{pid}.log
+    name_pattern: "debug-{timestamp}-pid{pid}.log"

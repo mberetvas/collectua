@@ -6,6 +6,23 @@ from dataclasses import asdict, dataclass, field
 
 
 @dataclass
+class FileLoggingConfig:
+    """Per-connection file logging configuration."""
+
+    enabled: bool = False
+    path: str = "logs/debug"
+    name_pattern: str = "debug-{timestamp}-pid{pid}.log"
+
+
+@dataclass
+class LoggingConfig:
+    """Per-connection logging configuration."""
+
+    level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    file: FileLoggingConfig = field(default_factory=FileLoggingConfig)
+
+
+@dataclass
 class ConnectionConfig:
     url: str
     timeout: float
@@ -17,6 +34,7 @@ class ConnectionConfig:
     security_mode: str = "None_"
     cert_file: str = ""
     key_file: str = ""
+    logging_config: LoggingConfig | None = None
 
 
 @dataclass
@@ -44,6 +62,25 @@ class RuntimeConfig:
 
     @classmethod
     def from_namespace(cls, args) -> "RuntimeConfig":
+        # Extract and build logging config from args if present
+        logging_config = None
+        logging_dict = getattr(args, "logging", None)
+        if logging_dict and isinstance(logging_dict, dict):
+            file_dict = logging_dict.get("file", {})
+            if isinstance(file_dict, dict):
+                file_config = FileLoggingConfig(
+                    enabled=file_dict.get("enabled", False),
+                    path=file_dict.get("path", "logs/debug"),
+                    name_pattern=file_dict.get("name_pattern", "debug-{timestamp}-pid{pid}.log"),
+                )
+            else:
+                file_config = FileLoggingConfig()
+
+            logging_config = LoggingConfig(
+                level=logging_dict.get("level", "INFO"),
+                file=file_config,
+            )
+
         return cls(
             command=getattr(args, "command", ""),
             log_level=getattr(args, "log_level", "INFO"),
@@ -60,6 +97,7 @@ class RuntimeConfig:
                 security_mode=getattr(args, "security_mode", "None_"),
                 cert_file=getattr(args, "cert_file", ""),
                 key_file=getattr(args, "key_file", ""),
+                logging_config=logging_config,
             ),
             browse=BrowseConfig(
                 max_depth=int(getattr(args, "max_depth", 3)),

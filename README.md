@@ -133,6 +133,8 @@ opcua-client collect \
   --csv-file alarms.csv
 ```
 
+The collector subscribes to OPC UA **Alarms & Conditions** (`ConditionType`) and requests current active alarm state via `ConditionRefresh` when supported by the server.
+
 ### Interactive TUI Mode
 
 ```bash
@@ -210,6 +212,8 @@ opcua-client --tui \
 - Alarm events are still appended to `alarms.csv` while the TUI is running.
 - Variable values are read on selection, so the node details panel updates as you move through the tree.
 - When browsing large servers, the tree expands lazily to keep the interface responsive.
+- For Siemens S7-1500, ensure OPC UA **Alarms and Conditions** is enabled in CPU OPC UA server settings and the project is downloaded to the PLC.
+- On startup, the TUI requests current alarm state using `ConditionRefresh` (if supported) so active alarms that predate the subscription can appear.
 
 ## Configuration
 
@@ -254,6 +258,62 @@ opcua-client --tui
 ```
 
 Precedence rule: **explicit CLI args override profile values**.
+
+### Logging Configuration (Per-Connection)
+
+You can configure logging behavior on a per-connection basis by adding a `logging` section to your connection profile. This is useful for enabling detailed debug logging for specific connections while keeping others in production mode.
+
+Example with logging configuration (`connections/debug-server.yaml`):
+
+```yaml
+url: "opc.tcp://debug-server.internal:4840"
+timeout: 30.0
+session_timeout: 60000
+request_timeout: 20000
+username: ""
+password: ""
+auth_policy: "None"
+security_mode: "None_"
+cert_file: ""
+key_file: ""
+
+# Per-connection logging configuration (optional)
+logging:
+  # Log level for this connection (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  # Overrides global --log-level when specified
+  level: "DEBUG"
+  
+  file:
+    # Enable file logging for this connection
+    # Overrides global --mode setting, allowing per-connection file logging
+    enabled: true
+    
+    # Directory for log files (defaults to logs/debug)
+    path: "logs/debug"
+    
+    # Filename pattern (available: {timestamp} = YYYYMMDD-HHMMSS, {pid} = process ID)
+    name_pattern: "debug-{timestamp}-pid{pid}.log"
+```
+
+**Logging behavior**:
+- If `logging` section is present, those settings take precedence over CLI flags
+- If `logging` section is absent, global CLI flags (`--log-level`, `--mode`) apply
+- Connection config allows you to debug specific servers without affecting others
+- Useful for production setups where you only want verbose logging for troubleshooting servers
+
+**Examples**:
+
+```bash
+# Use logging config from profile (DEBUG level, file enabled)
+opcua-client browse --connection-profile debug-server
+
+# Override profile logging level from CLI
+# Note: Profile settings take precedence; to override, modify the profile or use explicit CLI connection args
+opcua-client collect --url opc.tcp://server:4840 --log-level INFO
+
+# Enable debug mode globally (applies to all connections without logging config)
+opcua-client --tui --mode debug --log-level DEBUG --connection-profile prod-server
+```
 
 ### Command-Line Arguments
 
