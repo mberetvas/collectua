@@ -16,7 +16,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
-from asyncua import Client, NodeId, ua
+from asyncua import Client, ua
+
+from opcua_client.condition_refresh import condition_refresh_with_retry
 
 # ──────────────────────── CONFIG ────────────────────────
 CSV_FILE = "alarms.csv"
@@ -82,7 +84,7 @@ class AlarmHandler:
         if value is None:
             return None
         # asyncua typically exposes a NodeId or Variant-like object; fall back to str().
-        if isinstance(value, NodeId):
+        if isinstance(value, ua.NodeId):
             return value.to_string()
         to_string = getattr(value, "to_string", None)
         if callable(to_string):
@@ -209,18 +211,13 @@ async def subscribe(client: Client, handler: AlarmHandler, publish_interval_ms: 
     )
     _logger.info("Subscribed to BaseEventType and ConditionType alarms & events")
 
-    # ConditionRefresh requests the current active-alarm backlog from the server.
-    # Must be called on the Server Object node (i=2253), NOT on the ConditionType
-    # ObjectType node (i=2782). ConditionType is an abstract type definition — calling
-    # methods on it causes a protocol-level failure on Siemens S7-1500.
-    try:
-        await server_node.call_method(
-            ua.ObjectIds.ConditionType_ConditionRefresh,
-            ua.Variant(subscription.subscription_id, ua.VariantType.UInt32),
-        )
-        _logger.info("ConditionRefresh called — requested active alarm backlog")
-    except Exception as exc:
-        _logger.warning("ConditionRefresh failed: %s", exc)
+    # Delay ConditionRefresh slightly so the subscription is fully established.
+    await asyncio.sleep(2.0)
+    await condition_refresh_with_retry(
+        server_node=server_node,
+        subscription_id=subscription.subscription_id,
+        logger=_logger,
+    )
 
     return subscription
 

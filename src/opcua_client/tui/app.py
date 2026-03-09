@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
-from asyncua import Client, NodeId, ua
+from asyncua import Client, ua
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -19,6 +19,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.condition_refresh import condition_refresh_with_retry
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
@@ -135,7 +136,7 @@ class TuiAlarmHandler:
         value = getattr(event, "ConditionId", None)
         if value is None:
             return None
-        if isinstance(value, NodeId):
+        if isinstance(value, ua.NodeId):
             return value.to_string()
         to_string = getattr(value, "to_string", None)
         if callable(to_string):
@@ -512,18 +513,35 @@ class OpcuaTuiApp(App[None]):
         )
         _logger.info("Subscribed to BaseEventType and ConditionType events")
 
-        # ConditionRefresh requests the current active-alarm backlog from the server.
-        # Must be called on the Server Object node (i=2253), NOT on the ConditionType
-        # ObjectType node (i=2782). ConditionType is an abstract type definition — calling
-        # methods on it causes a protocol-level failure on Siemens S7-1500.
-        try:
-            await server_node.call_method(
-                ua.ObjectIds.ConditionType_ConditionRefresh,
-                ua.Variant(self._subscription.subscription_id, ua.VariantType.UInt32),
+        subscription_id = self._subscription.subscription_id
+
+        async def _run_condition_refresh() -> None:
+            await asyncio.sleep(2.0)
+            if (
+                self._shutdown_requested
+                or not self._client
+                or not self._subscription
+                or self._subscription.subscription_id != subscription_id
+            ):
+                _logger.info(
+                    "Skipping ConditionRefresh for SubscriptionId=%s: client or subscription no longer active",
+                    subscription_id,
+                )
+                return
+
+            await condition_refresh_with_retry(
+                server_node=server_node,
+                subscription_id=subscription_id,
+                logger=_logger,
+                is_active=lambda: (
+                    not self._shutdown_requested
+                    and self._client is not None
+                    and self._subscription is not None
+                    and self._subscription.subscription_id == subscription_id
+                ),
             )
-            _logger.info("ConditionRefresh called — requested active alarm backlog")
-        except Exception as exc:
-            _logger.warning("ConditionRefresh failed: %s", exc)
+
+        asyncio.create_task(_run_condition_refresh())
 
         while not self._shutdown_requested and self._client:
             await asyncio.sleep(1)
