@@ -51,6 +51,9 @@ class HelpScreen(ModalScreen[None]):
                     "[b]OPC UA TUI Help[/b]",
                     "",
                     "Tab: Focus next panel",
+                    "↑/↓: Previous/next sibling node (when Node Tree is focused)",
+                    "→: Expand node or focus first child",
+                    "←: Collapse node or focus parent",
                     "F6: Toggle Alarms / Node Info tab",
                     "F1: Help",
                     "F5: Reconnect",
@@ -146,6 +149,10 @@ class OpcuaTuiApp(App[None]):
         Binding("f1", "help", "Help"),
         Binding("f9", "toggle_config", "Toggle Config"),
         Binding("tab", "focus_next_panel", "Next Panel"),
+        Binding("right", "expand_or_focus_right", "Expand/Right", show=False),
+        Binding("left", "collapse_or_focus_left", "Collapse/Left", show=False),
+        Binding("up", "focus_previous", "Up", show=False),
+        Binding("down", "focus_next", "Down", show=False),
     ]
 
     def __init__(self, config: RuntimeConfig):
@@ -158,6 +165,7 @@ class OpcuaTuiApp(App[None]):
         self._shutdown_requested = False
         self._log_handler: TuiLogHandler | None = None
         self._selected_node: dict[str, Any] | None = None
+        self._pending_focus_first_child_node_ids: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -350,6 +358,7 @@ class OpcuaTuiApp(App[None]):
         node_data = getattr(tree_node, "data", None)
         if not isinstance(node_data, dict):
             return
+        node_id = str(node_data.get("id", ""))
 
         if not node_data.get("expandable"):
             return
@@ -364,6 +373,8 @@ class OpcuaTuiApp(App[None]):
             _logger.exception("Failed to lazy-load node children")
             tree_widget.remove_placeholder(tree_node)
             tree_node.add(f"⚠ Failed to load: {exc}", data={"_load_error": True}, allow_expand=False)
+            if node_id:
+                self._pending_focus_first_child_node_ids.discard(node_id)
             return
 
         tree_widget.remove_placeholder(tree_node)
@@ -375,6 +386,10 @@ class OpcuaTuiApp(App[None]):
             node_data["expandable"] = False
             tree_node.data = node_data
             tree_node.allow_expand = False
+
+        if node_id and node_id in self._pending_focus_first_child_node_ids:
+            self._pending_focus_first_child_node_ids.discard(node_id)
+            tree_widget.focus_first_child(tree_node)
 
     async def _run_collector_loop(self) -> None:
         if not self._client:
@@ -488,6 +503,67 @@ class OpcuaTuiApp(App[None]):
 
     def action_focus_next_panel(self) -> None:
         self.screen.focus_next()
+
+    def action_expand_or_focus_right(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        node = tree.cursor_node
+        if node is None:
+            return
+
+        if node.allow_expand and not node.is_expanded:
+            node_data = getattr(node, "data", None)
+            node.expand()
+            if tree.focus_first_child(node):
+                return
+            if isinstance(node_data, dict):
+                node_id = str(node_data.get("id", ""))
+                if node_id:
+                    self._pending_focus_first_child_node_ids.add(node_id)
+            return
+
+        if node.is_expanded:
+            tree.focus_first_child(node)
+
+    def action_collapse_or_focus_left(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        node = tree.cursor_node
+        if node is None:
+            return
+
+        if node.allow_expand and node.is_expanded:
+            node.collapse()
+            tree.focus_node(node)
+            return
+
+        tree.focus_parent(node)
+
+    def action_focus_previous(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        node = tree.cursor_node
+        if node is None:
+            return
+
+        tree.focus_previous_sibling(node)
+
+    def action_focus_next(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        node = tree.cursor_node
+        if node is None:
+            return
+
+        tree.focus_next_sibling(node)
 
     def action_toggle_main_tab(self) -> None:
         tabbed = self.query_one("#tabbed-panel", TabbedContent)

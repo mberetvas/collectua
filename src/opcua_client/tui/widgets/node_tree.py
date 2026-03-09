@@ -47,6 +47,63 @@ class NodeTreeWidget(Tree[dict[str, Any]]):
                 return True
         return False
 
+    def is_placeholder_node(self, tree_node) -> bool:
+        data = getattr(tree_node, "data", None)
+        return isinstance(data, dict) and data.get("_placeholder") is True
+
+    def focus_node(self, tree_node) -> bool:
+        if tree_node is None:
+            return False
+        self.move_cursor(tree_node)
+        self.select_node(tree_node)
+        return True
+
+    def _first_navigable_child(self, tree_node):
+        for child in tree_node.children:
+            if not self.is_placeholder_node(child):
+                return child
+        return None
+
+    def focus_first_child(self, tree_node) -> bool:
+        child = self._first_navigable_child(tree_node)
+        return self.focus_node(child)
+
+    def focus_parent(self, tree_node) -> bool:
+        parent = getattr(tree_node, "parent", None)
+        if parent is None:
+            return False
+        return self.focus_node(parent)
+
+    def focus_previous_sibling(self, tree_node) -> bool:
+        parent = getattr(tree_node, "parent", None)
+        if parent is None:
+            return False
+
+        siblings = [child for child in parent.children if not self.is_placeholder_node(child)]
+        try:
+            index = siblings.index(tree_node)
+        except ValueError:
+            return False
+
+        if index <= 0:
+            return False
+        return self.focus_node(siblings[index - 1])
+
+    def focus_next_sibling(self, tree_node) -> bool:
+        parent = getattr(tree_node, "parent", None)
+        if parent is None:
+            return False
+
+        siblings = [child for child in parent.children if not self.is_placeholder_node(child)]
+        try:
+            index = siblings.index(tree_node)
+        except ValueError:
+            return False
+
+        if index >= len(siblings) - 1:
+            return False
+        return self.focus_node(siblings[index + 1])
+
     @staticmethod
     def _fmt_label(item: dict[str, Any]) -> str:
         name = item.get("name", "?")

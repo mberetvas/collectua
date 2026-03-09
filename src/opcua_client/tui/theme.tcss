@@ -75,7 +75,7 @@ Footer {
 
 #help-modal {
     width: 70;
-    height: 14;
+    height: 18;
     border: thick #7dcfff;
     background: #161925;
     color: #d7dce2;
