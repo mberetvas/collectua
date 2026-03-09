@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Siemens S7-1500 alarm/event visibility in TUI and collector**
-  - Switched alarm subscriptions from `BaseEventType` to `ConditionType` so OPC UA Alarms & Conditions events are captured correctly
-  - Added `ConditionRefresh` after subscription startup to request current active alarm state from servers that support it
+  - Subscriptions now request both `BaseEventType` (general events) and `ConditionType` (Siemens OPC UA Alarms & Conditions) simultaneously
+  - Added `where_clause_generation=False` to prevent asyncua from sending a strict EventFilter WhereClause that Siemens S7-1500 OPC UA server rejects, which previously caused all incoming events to be silently dropped
+  - `ConditionRefresh` is now invoked correctly on the `ConditionType` node (not the `Server` node) per the OPC UA specification, so the PLC pushes its full active-alarm backlog immediately on subscription
   - Added debug logging of raw incoming event payloads to simplify diagnostics when vendor-specific event fields are missing
 
 ## [0.1.1] - 2026-03-09
