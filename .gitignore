@@ -236,3 +236,4 @@ certs/
 alarms.csv
 
 connections/
+logs/
