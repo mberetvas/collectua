@@ -5,7 +5,8 @@
 Do you want to monitor and collect alarms/events from your fancy, miserable OPC UA-enabled PLCs right from your command line? Maybe browse that never-ending node tree just to prove a point in a meeting? **This project is for you.**
 No GUI required, some technical self-loathing preferred.
 
-![collectua TUI example](collectua_tui.png)
+![collectua TUI example](collectua_2026-03-10T14_48_52_318121.svg)
+![collectua mascote](mascote_collectua.jpg)
 
 - **Textual TUI ("htop" for OPC UA):** Fancy terminal dashboard that streams alarms and lets you poke around the server’s address space.
 - **CLI Tools:** Scriptable commands for events, browsing, testing authentication, and backing up your sanity.
@@ -14,22 +15,15 @@ No GUI required, some technical self-loathing preferred.
 
 ## Quickstart
 
-First, check Python is v3.12+.
+First, check if uv is accesible.
 Then do yourself a favor:
 
 ```shell
-pip install -r requirements.txt
-# or trust pyproject.toml if you must
+uv tool install --from https://github.com/mberetvas/collectua.git
 ```
 
 ### Run the Terminal Dashboard
 
-1. Make a connection profile, or just launch and let it ask you awkward questions:
-   ```
-   python -m opcua_client.cli --tui
-   ```
-
-2. Or the lazy way:
    ```
    collectua --tui
    ```

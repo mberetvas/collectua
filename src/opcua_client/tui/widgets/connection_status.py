@@ -5,6 +5,11 @@ from datetime import datetime
 from textual.reactive import reactive
 from textual.widgets import Static
 
+RETRO_OK = "#8aff80"
+RETRO_WARN = "#ffbf4d"
+RETRO_ERR = "#ff5f5f"
+RETRO_ACCENT = "#6ee768"
+
 
 def _fmt_uptime(seconds: int) -> str:
     hours, rem = divmod(max(seconds, 0), 3600)
@@ -51,13 +56,13 @@ class ConnectionStatusWidget(Static):
 
     def _refresh_content(self) -> None:
         if self.connected:
-            color = "#9ece6a"
+            color = RETRO_OK
             status = "Connected"
         elif self.reconnecting:
-            color = "#e0af68"
+            color = RETRO_WARN
             status = "Reconnecting"
         else:
-            color = "#f7768e"
+            color = RETRO_ERR
             status = "Disconnected"
 
         msg = self.error.strip()
@@ -66,11 +71,11 @@ class ConnectionStatusWidget(Static):
 
         line = (
             f"[bold {color}]● {status}[/]  "
-            f"[cyan]{self.endpoint}[/]  "
-            f"security=[magenta]{self.security_mode}[/]  "
-            f"uptime=[green]{_fmt_uptime(self._uptime_seconds)}[/]"
+            f"[{RETRO_ACCENT}]{self.endpoint}[/]  "
+            f"security=[{RETRO_WARN}]{self.security_mode}[/]  "
+            f"uptime=[{RETRO_OK}]{_fmt_uptime(self._uptime_seconds)}[/]"
         )
         if msg:
-            line += f"  err=[yellow]{msg}[/]"
+            line += f"  err=[{RETRO_WARN}]{msg}[/]"
 
         self.update(line)

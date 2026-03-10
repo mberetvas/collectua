@@ -47,13 +47,13 @@ class AlarmTableWidget(DataTable):
         try:
             value = int(severity)
         except (TypeError, ValueError):
-            return "white"
+            return "#8aff80"
 
         if value >= 700:
-            return "bold #f7768e"
+            return "bold #ff5f5f"
         if value >= 400:
-            return "bold #e0af68"
-        return "bold #9ece6a"
+            return "bold #ffbf4d"
+        return "bold #8aff80"
 
     @staticmethod
     def _format_time(timestamp: str) -> str:
