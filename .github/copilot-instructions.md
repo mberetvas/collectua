@@ -1,10 +1,10 @@
 ---
-name: opcua-client-instructions
-description: "Workspace instructions for OPC UA Client CLI project. Enforce documentation sync, UV tooling, Python conventions, async patterns, and mode-based design."
+name: collectua-instructions
+description: "Workspace instructions for collectua CLI project. Enforce documentation sync, UV tooling, Python conventions, async patterns, and mode-based design."
 applyTo: "**"
 ---
 
-# OPC UA Client Project Instructions
+# collectua Project Instructions
 
 ## Documentation Synchronization
 

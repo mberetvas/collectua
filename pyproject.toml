@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.scripts]
-opcua-client = "opcua_client:main"
+collectua = "opcua_client:main"
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]

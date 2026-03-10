@@ -8,7 +8,7 @@ default:
 run-opcua-server:
     @echo "Running OPC UA server for testing..."
     @echo "This will start the OPC UA server on url opc.tcp://localhost:50000"
-    @echo "You can use this server for testing the opcua-client"
+    @echo "You can use this server for testing collectua"
     @echo "To view the server logs, run: docker logs -f opcplc"
     @echo "To stop the server, run: docker stop opcplc"
     @echo "You can also use the just commands to view the logs and stop the server"

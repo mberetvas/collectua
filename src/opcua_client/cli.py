@@ -279,7 +279,7 @@ async def _connect_smoke(config: RuntimeConfig):
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="opcua-client",
+        prog="collectua",
         description="OPC UA command center CLI",
     )
     parser.add_argument(
@@ -527,7 +527,7 @@ def main(argv=None) -> int:
             if not profiles:
                 print(
                     "No connection profiles available. Create one in ./connections/ or "
-                    "~/.config/opcua-client/connections/, or launch opcua-client with connection args."
+                    "~/.config/opcua-client/connections/, or launch collectua with connection args."
                 )
                 return 2
             # Use TUI profile chooser function

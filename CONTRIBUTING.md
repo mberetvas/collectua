@@ -1,4 +1,4 @@
-# Contributing to OPC UA Client
+# Contributing to collectua
 
 Thank you for your interest in contributing to the OPC UA Client project! We appreciate contributions of all kinds: code, documentation, bug reports, and feature requests.
 
@@ -19,7 +19,7 @@ This project adheres to the Contributor Covenant Code of Conduct. By participati
 ```bash
 # Clone the repository
 git clone https://github.com/{{GITHUB_ORG}}/{{GITHUB_REPO}}.git
-cd opcua-client
+cd collectua
 
 # Create virtual environment
 python3.12 -m venv .venv
@@ -29,7 +29,7 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate.bat
 uv sync
 
 # Verify setup
-opcua-client --version
+collectua --version
 ```
 
 ## Development Workflow
@@ -318,7 +318,7 @@ Once approved:
 
 Please include:
 
-1. **Version:** `opcua-client --version`
+1. **Version:** `collectua --version`
 2. **Python version:** `python --version`
 3. **OS:** Linux/macOS/Windows with version
 4. **Steps to reproduce:**
@@ -384,4 +384,4 @@ Contributors are recognized in:
 
 ---
 
-Thank you for contributing to OPC UA Client! 🎉
+Thank you for contributing to collectua! 🎉

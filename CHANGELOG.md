@@ -23,13 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Connections without a backing profile can still be trusted for the current run, but trust is not persisted
 
 ### Changed
-- **BREAKING: TUI launch method changed** - Use `opcua-client --tui` instead of separate `opcua-tui` command
+- **BREAKING: TUI launch method changed** - Use `collectua --tui` instead of separate `opcua-tui` command
   - The `opcua-tui` command has been removed as a separate entry point
-  - Instead, use `opcua-client --tui` to launch the terminal dashboard
-  - All TUI flags and options remain the same: `opcua-client --tui --url opc.tcp://server:4840`
-  - `opcua-client --tui` and `opcua-client [subcommand]` are mutually exclusive
+  - Instead, use `collectua --tui` to launch the terminal dashboard
+  - All TUI flags and options remain the same: `collectua --tui --url opc.tcp://server:4840`
+  - `collectua --tui` and `collectua [subcommand]` are mutually exclusive
   - Simplifies the CLI surface and reduces code duplication
-  - Shell alias example: `alias opcua-tui='opcua-client --tui'` for legacy compatibility
+  - Shell alias example: `alias opcua-tui='collectua --tui'` for legacy compatibility
 
 ### Fixed
 - **Siemens S7-1500 alarm/event visibility in TUI and collector**
@@ -47,10 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Profile discovery searches repo-local then user config directory
   - Strict key validation with helpful error messages for unknown fields
 - **`--connection-profile` flag** - Use a named profile with any CLI command or TUI
-  - `opcua-client config --connection-profile prod --action show`
+  - `collectua config --connection-profile prod --action show`
   - `opcua-tui --connection-profile staging`
   - Explicit CLI args override profile values (deterministic precedence)
-- **`opcua-client list-profiles` command** - Display available connection profiles
+- **`collectua list-profiles` command** - Display available connection profiles
   - Lists all discovered profiles by name
   - Useful for automation and script workflows
 - **TUI no-args default behavior** - Interactive profile selection on startup
@@ -78,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Initial OPC UA client CLI with command-line interface
-- **UV package manager support** - Run project using `uv run opcua-client` or `uv sync` for dependency management
+- **UV package manager support** - Run project using `uv run collectua` or `uv sync` for dependency management
 - Production and debug runtime modes with configurable logging
 - Debug log file generation with per-run timestamps
 - Four main CLI commands:
