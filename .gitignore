@@ -233,3 +233,4 @@ __marimo__/
 .streamlit/secrets.toml
 
 certs/
+alarms.csv

@@ -242,6 +242,7 @@ class OpcuaTuiApp(App[None]):
         Binding("f6", "toggle_main_tab", "Toggle Main Tab"),
         Binding("shift+f6", "show_alarm_tab", "Show Alarms"),
         Binding("f1", "help", "Help"),
+        Binding("f8", "toggle_logs", "Toggle Logs"),
         Binding("f9", "toggle_config", "Toggle Config"),
         Binding("tab", "focus_next_panel", "Next Panel"),
         Binding("right", "expand_or_focus_right", "Expand/Right", show=False),
@@ -261,6 +262,8 @@ class OpcuaTuiApp(App[None]):
         self._log_handler: TuiLogHandler | None = None
         self._selected_node: dict[str, Any] | None = None
         self._pending_focus_first_child_node_ids: set[str] = set()
+        # 0 = default layout, 1 = right-column logs, 2 = full-screen logs
+        self._log_mode: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -275,7 +278,6 @@ class OpcuaTuiApp(App[None]):
                         yield AlarmTableWidget(id="alarm-table")
                     with TabPane("Node Info", id="tab-node-info"):
                         yield NodeInfoPanelWidget(id="node-info-content")
-                yield Static("Logs", classes="panel-title")
                 from .widgets.log_stream import LogStreamWidget
 
                 yield LogStreamWidget(id="log-stream")
@@ -300,6 +302,64 @@ class OpcuaTuiApp(App[None]):
         root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
 
         self._runner_task = asyncio.create_task(self._run_connection_supervisor())
+
+    def _apply_log_mode(self) -> None:
+        log_stream = self.query_one("#log-stream")
+        config_panel = self.query_one(ConfigPanel)
+        tabbed = self.query_one("#tabbed-panel", TabbedContent)
+        header = self.query_one(Header)
+        status = self.query_one("#connection-status", ConnectionStatusWidget)
+        left_column = self.query_one("#left-column")
+        right_column = self.query_one("#right-column")
+        footer = self.query_one(Footer)
+
+        if self._log_mode == 0:
+            # Default: full dashboard layout.
+            header.display = True
+            status.display = True
+            left_column.display = True
+            right_column.display = True
+            footer.display = True
+
+            log_stream.display = True
+            log_stream.styles.height = None  # defer to CSS (fixed height)
+            right_column.styles.width = None
+
+            tabbed.display = True
+            config_panel.display = True
+        elif self._log_mode == 1:
+            # Full-width/right-column logs, hide config panel.
+            header.display = True
+            status.display = True
+            left_column.display = True
+            right_column.display = True
+            footer.display = True
+
+            log_stream.display = True
+            log_stream.styles.height = "1fr"
+            right_column.styles.width = None
+
+            tabbed.display = False
+            config_panel.display = False
+        else:
+            # Full-screen logs: hide main content except connection status + footer.
+            header.display = False
+            status.display = True
+            left_column.display = False
+            footer.display = True
+
+            right_column.display = True
+            right_column.styles.width = "1fr"
+
+            log_stream.display = True
+            log_stream.styles.height = "1fr"
+
+            tabbed.display = False
+            config_panel.display = False
+
+    def action_toggle_logs(self) -> None:
+        self._log_mode = (self._log_mode + 1) % 3
+        self._apply_log_mode()
 
     async def _create_client(self) -> Client:
         conn = self.config.connection

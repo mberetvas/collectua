@@ -7,8 +7,31 @@ from textual.widgets import RichLog
 
 
 class LogStreamWidget(RichLog):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._entries: list[Text] = []
+
     def on_mount(self) -> None:
         self.border_title = "Logs"
+        # Disable auto scroll so the view doesn't jump back to the
+        # bottom while the user is scrolling through earlier log lines.
+        self.auto_scroll = False
+
+    def add_entry(self, entry: Text) -> None:
+        """Add a log entry, rendering newest entries at the top."""
+        self._entries.append(entry)
+
+        max_lines = getattr(self, "max_lines", None)
+        if isinstance(max_lines, int) and max_lines > 0:
+            overflow = len(self._entries) - max_lines
+            if overflow > 0:
+                self._entries = self._entries[overflow:]
+
+        self.clear()
+        for renderable in reversed(self._entries):
+            # scroll_end=False so we don't jump the viewport while the
+            # user is reading older entries.
+            self.write(renderable, scroll_end=False)
 
 
 class TuiLogHandler(logging.Handler):
@@ -20,7 +43,7 @@ class TuiLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            self.widget.write(Text(msg, style=self._style_for(record.levelno)))
+            self.widget.add_entry(Text(msg, style=self._style_for(record.levelno)))
         except Exception:
             self.handleError(record)
 
