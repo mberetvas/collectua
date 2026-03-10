@@ -50,9 +50,9 @@ class TuiLogHandler(logging.Handler):
     @staticmethod
     def _style_for(level: int) -> str:
         if level >= logging.ERROR:
-            return "bold #f7768e"
+            return "bold #ff5f5f"
         if level >= logging.WARNING:
-            return "bold #e0af68"
+            return "bold #ffbf4d"
         if level >= logging.INFO:
-            return "#9ece6a"
-        return "#7aa2f7"
+            return "#8aff80"
+        return "#6ee768"

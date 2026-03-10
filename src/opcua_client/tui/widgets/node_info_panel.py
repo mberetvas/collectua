@@ -26,28 +26,28 @@ class NodeInfoPanelWidget(Static):
         icon = "📊" if node_class == "Variable" else "📁"
 
         lines = [
-            f"{icon} [bold #86e1fc]Name:[/]       {name}",
-            f"   [bold #86e1fc]Node ID:[/]    {node_id}",
-            f"   [bold #86e1fc]Class:[/]      {node_class}",
+            f"{icon} [bold #8aff80]Name:[/]       {name}",
+            f"   [bold #8aff80]Node ID:[/]    {node_id}",
+            f"   [bold #8aff80]Class:[/]      {node_class}",
         ]
 
         if var_type:
-            lines.append(f"   [bold #86e1fc]Value Type:[/] {var_type}")
+            lines.append(f"   [bold #8aff80]Value Type:[/] {var_type}")
 
         if value_text is not None:
-            lines.append(f"   [bold #86e1fc]Value:[/]      {value_text}")
+            lines.append(f"   [bold #8aff80]Value:[/]      {value_text}")
         if value_status:
             lines.append(f"   [dim]{value_status}[/dim]")
 
         if children:
             lines.append("")
-            lines.append(f"   [bold #e0af68]Children ({len(children)}):[/]")
+            lines.append(f"   [bold #ffbf4d]Children ({len(children)}):[/]")
             for child in children:
                 child_name = child.get("name", "?")
                 child_cls = child.get("cls", "?")
                 child_type = child.get("type")
                 child_icon = "📊" if child_cls == "Variable" else "📁"
-                entry = f"     {child_icon} [#d7dce2]{child_name}[/] [dim]({child_cls})"
+                entry = f"     {child_icon} [#8aff80]{child_name}[/] [dim]({child_cls})"
                 if child_type:
                     entry += f" <{child_type}>"
                 entry += "[/dim]"

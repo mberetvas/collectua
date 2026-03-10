@@ -1,24 +1,24 @@
 Screen {
-    background: #11131a;
-    color: #d7dce2;
+    background: #050b05;
+    color: #8aff80;
 }
 
 Header {
-    background: #1b2333;
-    color: #86e1fc;
+    background: #081108;
+    color: #8aff80;
 }
 
 Footer {
-    background: #1b2333;
-    color: #9ece6a;
+    background: #081108;
+    color: #6ee768;
 }
 
 #connection-status {
     height: 3;
-    border: round #7dcfff;
+    border: round #2ca34a;
     margin: 0 1;
     padding: 0 1;
-    background: #161925;
+    background: #071207;
 }
 
 #main-grid {
@@ -40,34 +40,34 @@ Footer {
 #config-panel,
 #alarm-table,
 #log-stream {
-    border: round #3b4261;
-    background: #161925;
+    border: round #2a7d3e;
+    background: #071207;
     padding: 0 1;
     margin-bottom: 1;
 }
 
 #node-tree {
     height: 1fr;
-    border-title-color: #7dcfff;
+    border-title-color: #8aff80;
 }
 
 #config-panel {
     height: 12;
-    border-title-color: #9ece6a;
+    border-title-color: #6ee768;
 }
 
 #alarm-table {
     height: 1fr;
-    border-title-color: #f7768e;
+    border-title-color: #ffbf4d;
 }
 
 #log-stream {
     height: 12;
-    border-title-color: #e0af68;
+    border-title-color: #ffbf4d;
 }
 
 .panel-title {
-    color: #e0af68;
+    color: #ffbf4d;
     text-style: bold;
     height: 1;
     margin: 0 0 0 1;
@@ -76,10 +76,19 @@ Footer {
 #help-modal {
     width: 70;
     height: 18;
-    border: thick #7dcfff;
-    background: #161925;
-    color: #d7dce2;
+    border: thick #2ca34a;
+    background: #071207;
+    color: #8aff80;
     padding: 1 2;
+    content-align: center middle;
+}
+
+#splash-modal {
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #050b05;
+    color: #8aff80;
     content-align: center middle;
 }
 
@@ -87,8 +96,8 @@ Footer {
 
 #tabbed-panel {
     height: 1fr;
-    border: round #3b4261;
-    background: #161925;
+    border: round #2a7d3e;
+    background: #071207;
     padding: 0;
     margin-bottom: 1;
 }
@@ -104,24 +113,24 @@ Footer {
 #node-info-content {
     height: 1fr;
     padding: 1 2;
-    background: #161925;
-    color: #d7dce2;
+    background: #071207;
+    color: #8aff80;
     border: none;
     margin-bottom: 0;
 }
 
 /* Tab bar theming */
 #tabbed-panel Tabs {
-    background: #1b2333;
-    border-bottom: solid #3b4261;
+    background: #081108;
+    border-bottom: solid #2a7d3e;
 }
 
 #tabbed-panel Tab {
-    color: #9ece6a;
+    color: #6ee768;
 }
 
 #tabbed-panel Tab.-active {
-    color: #86e1fc;
+    color: #ffbf4d;
     text-style: bold;
 }
 

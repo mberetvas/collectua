@@ -8,9 +8,11 @@ import socket
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
 from asyncua import Client, ua
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -45,6 +47,9 @@ CSV_HEADERS = [
 ]
 
 _logger = logging.getLogger("tui")
+RETRO_GREEN = "#8aff80"
+RETRO_AMBER = "#ffbf4d"
+RETRO_RED = "#ff5f5f"
 
 
 @dataclass(frozen=True)
@@ -90,6 +95,57 @@ class HelpScreen(ModalScreen[None]):
         )
 
     def action_dismiss(self) -> None:
+        self.dismiss(None)
+
+
+class StartupSplashScreen(ModalScreen[None]):
+    BINDINGS = [Binding("escape", "dismiss", "Skip"), Binding("enter", "dismiss", "Skip")]
+
+    def __init__(self, ascii_art_path: Path) -> None:
+        super().__init__()
+        self._ascii_art_path = ascii_art_path
+        self._animation_task: asyncio.Task | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="splash-modal")
+
+    async def on_mount(self) -> None:
+        self._animation_task = asyncio.create_task(self._run_animation())
+
+    async def on_unmount(self) -> None:
+        if self._animation_task and not self._animation_task.done():
+            self._animation_task.cancel()
+            try:
+                await self._animation_task
+            except asyncio.CancelledError:
+                pass
+
+    def action_dismiss(self) -> None:
+        self.dismiss(None)
+
+    def _read_ascii_lines(self) -> list[str]:
+        try:
+            raw = self._ascii_art_path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            raw = [
+                "collectua",
+                "",
+                "OPC UA Command Center",
+            ]
+        return [line.rstrip() for line in raw]
+
+    async def _run_animation(self) -> None:
+        splash = self.query_one("#splash-modal", Static)
+        lines = self._read_ascii_lines()
+        rendered: list[str] = []
+
+        for line in lines:
+            rendered.append(line)
+            splash.update(Text("\n".join(rendered), style=f"bold {RETRO_GREEN}"))
+            await asyncio.sleep(0.08)
+
+        splash.update(Text("\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]), style=f"bold {RETRO_GREEN}"))
+        await asyncio.sleep(0.65)
         self.dismiss(None)
 
 
@@ -232,8 +288,7 @@ class TuiAlarmHandler:
 
 class OpcuaTuiApp(App[None]):
     CSS_PATH = "theme.tcss"
-    TITLE = "OPC UA Command Center"
-    SUB_TITLE = "htop/btop-inspired dashboard"
+    TITLE = "collectua"
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
@@ -254,6 +309,7 @@ class OpcuaTuiApp(App[None]):
     def __init__(self, config: RuntimeConfig):
         super().__init__()
         self.config = config
+        self._ascii_art_path = Path(__file__).resolve().parents[3] / "ascii_art.md"
         self._client: Client | None = None
         self._subscription = None
         self._runner_task: asyncio.Task | None = None
@@ -301,6 +357,17 @@ class OpcuaTuiApp(App[None]):
         root_logger.addHandler(self._log_handler)
         root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
 
+        # Do not block the Mount message handler on splash dismissal.
+        # Textual screen lifecycle callbacks are message-pump driven, so startup
+        # continues from the dismiss callback once the splash is gone.
+        self.push_screen(
+            StartupSplashScreen(self._ascii_art_path),
+            callback=lambda _result: self._start_connection_supervisor(),
+        )
+
+    def _start_connection_supervisor(self) -> None:
+        if self._runner_task and not self._runner_task.done():
+            return
         self._runner_task = asyncio.create_task(self._run_connection_supervisor())
 
     def _apply_log_mode(self) -> None:
@@ -650,7 +717,7 @@ class OpcuaTuiApp(App[None]):
             node_class = str(node_data.get("cls", ""))
 
             if node_class == "Variable":
-                panel.display_node(node_data, value_text="[yellow]Loading...[/yellow]")
+                panel.display_node(node_data, value_text=f"[{RETRO_AMBER}]Loading...[/{RETRO_AMBER}]")
                 if self._node_value_task and not self._node_value_task.done():
                     self._node_value_task.cancel()
                 self._node_value_task = asyncio.create_task(self._read_selected_node_value(node_data))
@@ -669,7 +736,7 @@ class OpcuaTuiApp(App[None]):
             if not self._client:
                 self.query_one(NodeInfoPanelWidget).display_node(
                     node_data,
-                    value_text="[red]Unavailable[/red]",
+                    value_text=f"[{RETRO_RED}]Unavailable[/{RETRO_RED}]",
                     value_status="Disconnected from server",
                 )
                 return
@@ -687,7 +754,7 @@ class OpcuaTuiApp(App[None]):
 
             self.query_one(NodeInfoPanelWidget).display_node(
                 node_data,
-                value_text=f"[bold #9ece6a]{value_rendered}[/bold #9ece6a]",
+                value_text=f"[bold {RETRO_GREEN}]{value_rendered}[/bold {RETRO_GREEN}]",
                 value_status=f"Read at {datetime.now().strftime('%H:%M:%S')}",
             )
         except asyncio.CancelledError:
@@ -697,7 +764,7 @@ class OpcuaTuiApp(App[None]):
             if self._selected_node and self._selected_node.get("id") == node_id:
                 self.query_one(NodeInfoPanelWidget).display_node(
                     node_data,
-                    value_text="[red]Read failed[/red]",
+                    value_text=f"[{RETRO_RED}]Read failed[/{RETRO_RED}]",
                     value_status=str(exc),
                 )
 
