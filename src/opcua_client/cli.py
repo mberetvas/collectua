@@ -3,9 +3,11 @@ import asyncio
 import logging
 import os
 import socket
+import sys
 from datetime import datetime
 from pathlib import Path
 
+import yaml
 from asyncua import Client, ua
 
 from . import browse, collector
@@ -175,8 +177,10 @@ def _persist_trust_to_profile(
     payload["trust_cert"] = True
 
     profile_path = resolve_profile_path(profile_name)
+    # Serialize before opening the target file to avoid truncating it on serialization errors.
+    serialized = yaml.safe_dump(payload, sort_keys=False)
     with profile_path.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(payload, handle, sort_keys=False)
+        handle.write(serialized)
 
 
 async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) -> None:

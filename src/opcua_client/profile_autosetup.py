@@ -10,7 +10,7 @@ from typing import Iterable, List
 import yaml
 from asyncua import Client, ua
 
-from .profile_loader import profile_search_dirs, resolve_profile_path
+from .profile_loader import load_profile, profile_search_dirs, resolve_profile_path
 
 
 @dataclass(frozen=True)
@@ -156,7 +156,13 @@ def ensure_profile_for_url_interactive(url: str) -> str:
     """
     existing = find_existing_profile_for_url(url)
     if existing:
-        return existing
+        try:
+            existing_payload = load_profile(existing)
+            existing_url = str(existing_payload.get("url", ""))
+            if existing_url.startswith("opc.tcp://"):
+                return existing
+        except Exception:
+            pass
 
     if not sys.stdin.isatty():
         raise RuntimeError(

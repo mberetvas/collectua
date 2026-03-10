@@ -317,6 +317,26 @@ class OpcuaTuiApp(App[None]):
             # Always use the global/default client certificate material for secure connections.
             cert_file, key_file = ensure_client_certificates()
             await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
+            selected_endpoint_app_uri = ""
+            try:
+                eps = await client.connect_and_get_server_endpoints()
+                for ep in eps:
+                    policy_short = ((getattr(ep, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None")
+                    mode_name = getattr(getattr(ep, "SecurityMode", None), "name", "")
+                    normalized_mode = "None_" if mode_name == "None" else mode_name
+                    if policy_short == conn.auth_policy and normalized_mode == conn.security_mode:
+                        selected_endpoint_app_uri = str(getattr(getattr(ep, "Server", None), "ApplicationUri", "") or "")
+                        break
+            except Exception:
+                pass
+            if selected_endpoint_app_uri:
+                original_create_session = client.uaclient.create_session
+
+                async def _patched_create_session(parameters):
+                    parameters.ServerUri = selected_endpoint_app_uri
+                    return await original_create_session(parameters)
+
+                client.uaclient.create_session = _patched_create_session
 
         return client
 
