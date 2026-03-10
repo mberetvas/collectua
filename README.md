@@ -5,6 +5,8 @@
 Do you want to monitor and collect alarms/events from your fancy, miserable OPC UA-enabled PLCs right from your command line? Maybe browse that never-ending node tree just to prove a point in a meeting? **This project is for you.**
 No GUI required, some technical self-loathing preferred.
 
+![collectua TUI example](collectua_tui.png)
+
 - **Textual TUI ("htop" for OPC UA):** Fancy terminal dashboard that streams alarms and lets you poke around the server’s address space.
 - **CLI Tools:** Scriptable commands for events, browsing, testing authentication, and backing up your sanity.
 - **Alarm/Event Collection:** Just like a NOC but with CSVs. And without a NOC.
