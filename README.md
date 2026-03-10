@@ -1,4 +1,4 @@
-# collectua — Terminal Dashboard and Command-Line Utilities
+# collectua — Terminal Dashboard and Command-Line Utilities <img src="mascote_collectua.jpg" alt="collectua mascot" width="80" align="right">
 
 ## What Is This?
 
@@ -6,7 +6,6 @@ Do you want to monitor and collect alarms/events from your fancy, miserable OPC 
 No GUI required, some technical self-loathing preferred.
 
 ![collectua TUI example](collectua_2026-03-10T14_48_52_318121.svg)
-![collectua mascote](mascote_collectua.jpg)
 
 - **Textual TUI ("htop" for OPC UA):** Fancy terminal dashboard that streams alarms and lets you poke around the server’s address space.
 - **CLI Tools:** Scriptable commands for events, browsing, testing authentication, and backing up your sanity.
