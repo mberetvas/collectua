@@ -13,8 +13,8 @@ PROFILE_KEYS = {
     "password",
     "auth_policy",
     "security_mode",
-    "cert_file",
-    "key_file",
+    "server_cert",
+    "trust_cert",
     "logging",
 }
 
@@ -53,6 +53,13 @@ def _resolve_profile_path(profile_name: str) -> Path:
     raise FileNotFoundError(
         f"Connection profile '{profile_name}' not found in ./connections/ or ~/.config/opcua-client/connections/"
     )
+
+
+def resolve_profile_path(profile_name: str) -> Path:
+    """
+    Public helper to resolve a profile name to its underlying YAML file path.
+    """
+    return _resolve_profile_path(profile_name)
 
 
 def load_profile(profile_name: str) -> dict:

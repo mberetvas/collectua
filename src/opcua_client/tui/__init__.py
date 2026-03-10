@@ -44,8 +44,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
-    parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
+    parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    parser.add_argument(
+        "--trust-cert",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
 
     parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
     parser.add_argument(

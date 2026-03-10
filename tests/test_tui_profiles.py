@@ -58,3 +58,32 @@ def test_tui_explicit_url_keeps_normal_flow(monkeypatch: pytest.MonkeyPatch) -> 
     rc = tui.main(["--url", "opc.tcp://direct:4840"])
 
     assert rc == 0
+
+
+def test_tui_profile_loader_accepts_server_cert_and_trust_cert(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Ensure that TUI entrypoint can load profiles with the new fields without errors.
+    monkeypatch.setattr(tui, "list_profiles", lambda: ["prod"])
+    monkeypatch.setattr(tui, "_choose_profile_name", lambda profiles: "prod")
+    monkeypatch.setattr(
+        tui,
+        "load_profile",
+        lambda name: {
+            "url": "opc.tcp://from-profile:4840",
+            "timeout": 22.0,
+            "server_cert": "server.der",
+            "trust_cert": True,
+        },
+    )
+
+    class _App(_DummyApp):
+        def __init__(self, config):
+            super().__init__(config)
+            # Access new fields to ensure they are present on the connection config.
+            assert hasattr(config.connection, "server_cert")
+            assert hasattr(config.connection, "trust_cert")
+
+    monkeypatch.setattr(tui, "OpcuaTuiApp", _App)
+
+    rc = tui.main([])
+
+    assert rc == 0

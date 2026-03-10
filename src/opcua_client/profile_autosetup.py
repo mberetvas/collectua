@@ -10,7 +10,7 @@ from typing import Iterable, List
 import yaml
 from asyncua import Client, ua
 
-from .profile_loader import profile_search_dirs
+from .profile_loader import profile_search_dirs, resolve_profile_path
 
 
 @dataclass(frozen=True)
@@ -182,7 +182,7 @@ def ensure_profile_for_url_interactive(url: str) -> str:
     directory = _choose_profile_directory_for_creation()
     profile_path = directory / f"{profile_name}.yaml"
 
-    payload = {
+    payload: dict = {
         "url": url,
         "timeout": 30.0,
         "session_timeout": 60000,
@@ -191,8 +191,9 @@ def ensure_profile_for_url_interactive(url: str) -> str:
         "password": password,
         "auth_policy": chosen.auth_policy,
         "security_mode": chosen.security_mode,
-        "cert_file": "",
-        "key_file": "",
+        # Server certificate metadata and trust flag are populated lazily on first trust.
+        "server_cert": "",
+        "trust_cert": False,
     }
 
     with profile_path.open("w", encoding="utf-8") as handle:

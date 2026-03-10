@@ -6,12 +6,12 @@ import socket
 from datetime import datetime
 from pathlib import Path
 
-from asyncua import Client
+from asyncua import Client, ua
 
 from . import browse, collector
 from .cert_paths import ensure_client_certificates
 from .profile_autosetup import ensure_profile_for_url_interactive
-from .profile_loader import list_profiles, load_profile
+from .profile_loader import list_profiles, load_profile, resolve_profile_path
 from .runtime_config import RuntimeConfig
 
 
@@ -92,6 +92,156 @@ def _configure_logging(
     return str(debug_log_file) if debug_log_file else None
 
 
+def _short_policy_from_uri(policy_uri: str) -> str:
+    """
+    Extract short policy name from a SecurityPolicy URI, e.g. ...#Basic256Sha256.
+    """
+    if not policy_uri:
+        return "None"
+    if "#" in policy_uri:
+        return policy_uri.rsplit("#", 1)[-1] or "None"
+    return policy_uri
+
+
+async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
+    """
+    Connect to the OPC UA endpoint in discovery mode and collect the server
+    certificate for the configured security policy/mode.
+    """
+    conn = config.connection
+    client = Client(url=conn.url, timeout=conn.timeout)
+    try:
+        endpoints = await client.connect_and_get_server_endpoints()
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    if not endpoints:
+        raise RuntimeError(f"No endpoints discovered for OPC UA server at {conn.url}")
+
+    desired_policy = conn.auth_policy or "None"
+    desired_mode = conn.security_mode or "None_"
+
+    matched_cert: bytes | None = None
+    for ep in endpoints:
+        policy_uri = getattr(ep, "SecurityPolicyUri", "") or ""
+        policy_short = _short_policy_from_uri(policy_uri)
+
+        mode = getattr(ep, "SecurityMode", ua.MessageSecurityMode.None_)
+        mode_name = mode.name
+        security_mode = "None_" if mode_name == "None" else mode_name
+
+        if policy_short != desired_policy or security_mode != desired_mode:
+            continue
+
+        raw_cert = getattr(ep, "ServerCertificate", b"") or b""
+        # asyncua may expose this as bytes, bytearray or memoryview.
+        if isinstance(raw_cert, memoryview):
+            matched_cert = bytes(raw_cert)
+        else:
+            matched_cert = bytes(raw_cert)
+        break
+
+    if not matched_cert:
+        raise RuntimeError(
+            f"No server certificate available for endpoint with policy={desired_policy}, "
+            f"mode={desired_mode} at {conn.url}"
+        )
+
+    return matched_cert
+
+
+def _format_cert_fingerprint(cert_bytes: bytes) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(cert_bytes).hexdigest()
+    # Group into colon-separated pairs for readability.
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+def _persist_trust_to_profile(
+    profile_name: str,
+    server_cert_path: Path,
+) -> None:
+    """
+    Persist trust metadata to the given profile YAML.
+    """
+    from . import profile_loader
+
+    payload = profile_loader.load_profile(profile_name)
+    payload["server_cert"] = str(server_cert_path)
+    payload["trust_cert"] = True
+
+    profile_path = resolve_profile_path(profile_name)
+    with profile_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(payload, handle, sort_keys=False)
+
+
+async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) -> None:
+    """
+    Ensure that the server certificate for this connection is trusted.
+
+    - Automatically collects the server certificate from the endpoint.
+    - If trust_cert is False, prompts the user to trust the certificate.
+    - On acceptance, persists trust and server_cert path when a profile is available.
+    """
+    conn = config.connection
+
+    # No certificate in insecure mode.
+    if conn.security_mode == "None_":
+        return
+
+    # Already trusted for this connection, nothing to do.
+    if conn.trust_cert:
+        return
+
+    # Collect server certificate bytes from endpoints.
+    cert_bytes = await _collect_server_certificate(config)
+    fingerprint = _format_cert_fingerprint(cert_bytes)
+
+    # If we have a profile, store the certificate next to the profile file.
+    cert_path: Path | None = None
+    if profile_name:
+        profile_path = resolve_profile_path(profile_name)
+        cert_path = profile_path.with_suffix(".der")
+    else:
+        print(
+            "[trust warning] No connection profile associated with this connection; "
+            "server trust will not be persisted."
+        )
+
+    print("")
+    print("The OPC UA server certificate for this connection is not yet trusted.")
+    if cert_path is not None:
+        print(f"Planned certificate file: {cert_path}")
+    print(f"SHA-256 fingerprint: {fingerprint}")
+    print("")
+
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            "Server certificate is untrusted and interactive confirmation is required, "
+            "but no TTY is available. Run in an interactive terminal or mark the "
+            "certificate as trusted via profile/CLI."
+        )
+
+    answer = input("Do you want to trust this server certificate? [y/N]: ").strip().lower()
+    if answer != "y":
+        raise RuntimeError("Server certificate not trusted; aborting connection.")
+
+    # User accepted trust for this run.
+    conn.trust_cert = True
+
+    if cert_path is not None:
+        # Persist cert bytes and update profile YAML.
+        cert_path.write_bytes(cert_bytes)
+        _persist_trust_to_profile(profile_name, cert_path)
+        print(f"Trusted server certificate written to {cert_path} and profile updated.")
+    else:
+        print("Trusted server certificate for this run only (no profile to persist).")
+
+
 async def _connect_smoke(config: RuntimeConfig):
     """Connection smoke test command (supports insecure and secure modes)."""
     conn = config.connection
@@ -108,15 +258,9 @@ async def _connect_smoke(config: RuntimeConfig):
 
     try:
         if conn.security_mode != "None_":
-            # If no explicit cert/key paths are provided via CLI/profile,
-            # auto-generate or resolve client certificates.
-            if not conn.cert_file or not conn.key_file:
-                cert_file, key_file = ensure_client_certificates()
-                conn.cert_file = cert_file
-                conn.key_file = key_file
-            await client.set_security_string(
-                f"{conn.auth_policy},{conn.security_mode},{conn.cert_file},{conn.key_file}"
-            )
+            # Auto-generate or resolve client certificates (client-side).
+            cert_file, key_file = ensure_client_certificates()
+            await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
 
         await client.connect()
         logger.info("Connected. Negotiated session timeout: %dms", client.session_timeout)
@@ -181,8 +325,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
-    parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
+    parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    parser.add_argument(
+        "--trust-cert",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
     parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
     parser.add_argument(
         "--target-namespace",
@@ -264,8 +413,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    connect_parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
-    connect_parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
+    connect_parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    connect_parser.add_argument(
+        "--trust-cert",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
 
     config_parser = subparsers.add_parser("config", help="Show or validate normalized runtime configuration")
     _add_connection_profile_arg(config_parser)
@@ -291,8 +445,13 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    config_parser.add_argument("--cert-file", default=argparse.SUPPRESS, help="Client certificate path")
-    config_parser.add_argument("--key-file", default=argparse.SUPPRESS, help="Client private key path")
+    config_parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    config_parser.add_argument(
+        "--trust-cert",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
     config_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     config_parser.add_argument(
         "--target-namespace",
@@ -403,6 +562,13 @@ def main(argv=None) -> int:
             logger = logging.getLogger("cli")
             logger.info(f"Debug log: {debug_log_file}")
 
+        # Enforce server trust (interactive) before launching TUI.
+        try:
+            asyncio.run(_ensure_server_trust(config, profile_name))
+        except RuntimeError as exc:
+            print(f"[trust error] {exc}")
+            return 2
+
         # Launch TUI
         app = OpcuaTuiApp(config)
         app.run()
@@ -473,6 +639,11 @@ def main(argv=None) -> int:
         return 0
 
     if args.command == "connect":
+        try:
+            asyncio.run(_ensure_server_trust(config, profile_name))
+        except RuntimeError as exc:
+            print(f"[trust error] {exc}")
+            return 2
         asyncio.run(_connect_smoke(config))
         return 0
 

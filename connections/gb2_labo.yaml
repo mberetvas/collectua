@@ -6,8 +6,8 @@ username: ""
 password: ""
 auth_policy: "None"
 security_mode: "None_"
-cert_file: ""
-key_file: ""
+server_cert: ""
+trust_cert: false
 
 # Optional: Per-connection logging configuration
 # If not specified, uses global CLI settings (--log-level and --mode)

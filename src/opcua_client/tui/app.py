@@ -314,14 +314,9 @@ class OpcuaTuiApp(App[None]):
             client.set_password(conn.password)
 
         if conn.security_mode != "None_":
-            # Auto-generate or resolve client certificates when not explicitly configured.
-            if not conn.cert_file or not conn.key_file:
-                cert_file, key_file = ensure_client_certificates()
-                conn.cert_file = cert_file
-                conn.key_file = key_file
-            await client.set_security_string(
-                f"{conn.auth_policy},{conn.security_mode},{conn.cert_file},{conn.key_file}"
-            )
+            # Always use the global/default client certificate material for secure connections.
+            cert_file, key_file = ensure_client_certificates()
+            await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
 
         return client
 

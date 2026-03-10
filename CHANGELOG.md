@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Connection logging settings override global CLI flags (`--log-level`, `--mode`)
   - Useful for debugging specific connections while keeping others in production mode
   - See `connections/example.yaml` for configuration examples
+ - **Server certificate trust metadata** - Centralized client certificate with per-profile server trust
+  - Connection profiles now store server certificate metadata: `server_cert` and `trust_cert`
+  - Client certificate and private key are generated or resolved automatically (no longer configured per profile)
+  - On first secure connection when `trust_cert` is false, the CLI collects the server certificate, shows its fingerprint, and prompts the user to trust it
+  - When a profile is used, accepting trust writes the collected server certificate next to the profile YAML and persists `trust_cert: true`
+  - Connections without a backing profile can still be trusted for the current run, but trust is not persisted
 
 ### Changed
 - **BREAKING: TUI launch method changed** - Use `opcua-client --tui` instead of separate `opcua-tui` command
