@@ -13,6 +13,8 @@ PROFILE_KEYS = {
     "password",
     "auth_policy",
     "security_mode",
+    "cert_file",
+    "key_file",
     "server_cert",
     "trust_cert",
     "logging",

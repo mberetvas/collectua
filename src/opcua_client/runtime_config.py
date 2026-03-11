@@ -32,6 +32,8 @@ class ConnectionConfig:
     password: str = ""
     auth_policy: str = "None"
     security_mode: str = "None_"
+    cert_file: str = ""
+    key_file: str = ""
     server_cert: str = ""
     trust_cert: bool = False
     logging_config: LoggingConfig | None = None
@@ -95,6 +97,8 @@ class RuntimeConfig:
                 password=getattr(args, "password", ""),
                 auth_policy=getattr(args, "auth_policy", "None"),
                 security_mode=getattr(args, "security_mode", "None_"),
+                cert_file=getattr(args, "cert_file", ""),
+                key_file=getattr(args, "key_file", ""),
                 server_cert=getattr(args, "server_cert", ""),
                 trust_cert=bool(getattr(args, "trust_cert", False)),
                 logging_config=logging_config,
