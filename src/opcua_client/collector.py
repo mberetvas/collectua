@@ -14,7 +14,7 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional, Protocol
 
 from asyncua import Client, ua
 
@@ -43,6 +43,18 @@ CSV_HEADERS = [
 ]
 
 _logger = logging.getLogger("collector")
+
+
+class AlarmEventHandler(Protocol):
+    """
+    Minimal protocol for alarm/event handlers used by the collector core.
+
+    Both CLI and TUI handlers implement this implicitly (duck-typing).
+    """
+
+    def event_notification(self, event) -> None: ...
+
+    def status_change_notification(self, status) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -186,15 +198,33 @@ class AlarmHandler:
 
 
 async def connect(endpoint: str, timeout: float = TIMEOUT) -> Client:
-    """Create and connect an OPC UA client (no security)."""
+    """Create and connect an OPC UA client (no security).
+
+    This helper is primarily used by the CLI collector loop. The TUI uses its
+    own client factory that also configures security, but reuses the shared
+    subscription helpers below.
+    """
     client = Client(url=endpoint, timeout=timeout)
     await client.connect()
     _logger.info("Connected to %s", endpoint)
     return client
 
 
-async def subscribe(client: Client, handler: AlarmHandler, publish_interval_ms: int = PUBLISH_INTERVAL_MS):
-    """Subscribe to all alarm events from the Server node."""
+async def subscribe(
+    client: Client,
+    handler: AlarmEventHandler,
+    publish_interval_ms: int = PUBLISH_INTERVAL_MS,
+    *,
+    enable_condition_refresh: bool = True,
+    is_active: Optional[Callable[[], bool]] = None,
+):
+    """
+    Subscribe to all alarm events from the Server node.
+
+    This is the shared subscription helper used by both the CLI collector loop
+    and the TUI dashboard. It encapsulates the subscription creation,
+    event-type selection and optional ConditionRefresh.
+    """
     subscription = await client.create_subscription(
         period=publish_interval_ms,
         handler=handler,
@@ -211,13 +241,30 @@ async def subscribe(client: Client, handler: AlarmHandler, publish_interval_ms: 
     )
     _logger.info("Subscribed to BaseEventType and ConditionType alarms & events")
 
-    # Delay ConditionRefresh slightly so the subscription is fully established.
-    await asyncio.sleep(2.0)
-    await condition_refresh_with_retry(
-        server_node=server_node,
-        subscription_id=subscription.subscription_id,
-        logger=_logger,
-    )
+    if enable_condition_refresh:
+        async def _run_condition_refresh() -> None:
+            # Delay ConditionRefresh slightly so the subscription is fully established.
+            await asyncio.sleep(2.0)
+            if is_active is not None and not is_active():
+                _logger.info(
+                    "Skipping ConditionRefresh for SubscriptionId=%s: collector no longer active",
+                    subscription.subscription_id,
+                )
+                return
+
+            await condition_refresh_with_retry(
+                server_node=server_node,
+                subscription_id=subscription.subscription_id,
+                logger=_logger,
+                is_active=is_active,
+            )
+
+        # For long-running UI integrations, run ConditionRefresh in the background so it
+        # does not block the caller. For simple CLI usage we can run it inline.
+        if is_active is None:
+            await _run_condition_refresh()
+        else:
+            asyncio.create_task(_run_condition_refresh())
 
     return subscription
 
@@ -229,7 +276,10 @@ async def run(
     reconnect_delay_sec: int = RECONNECT_DELAY_SEC,
     timeout: float = TIMEOUT,
 ):
-    """Main loop with auto-reconnect. Core callable for CLI and future TUI."""
+    """Main loop with auto-reconnect. Core callable for the CLI.
+
+    This is a thin wrapper around the shared subscription helper and AlarmHandler.
+    """
     handler = AlarmHandler(csv_file)
 
     while True:
@@ -238,7 +288,13 @@ async def run(
 
         try:
             client = await connect(endpoint, timeout=timeout)
-            subscription = await subscribe(client, handler, publish_interval_ms=publish_interval_ms)
+            subscription = await subscribe(
+                client,
+                handler,
+                publish_interval_ms=publish_interval_ms,
+                enable_condition_refresh=True,
+                is_active=None,
+            )
 
             _logger.info("Listening for alarms... (Ctrl+C to stop)")
             while True:
