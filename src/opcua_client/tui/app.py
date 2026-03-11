@@ -6,7 +6,7 @@ import logging
 import os
 import socket
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
@@ -21,8 +21,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
 from opcua_client.runtime_config import RuntimeConfig
-from opcua_client.condition_refresh import condition_refresh_with_retry
 from opcua_client.cert_paths import ensure_client_certificates
+from opcua_client.condition_refresh import condition_refresh_with_retry
+from opcua_client.collector import CSV_HEADERS, ActiveAlarm, subscribe as collector_subscribe
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
@@ -31,41 +32,10 @@ from .widgets.log_stream import TuiLogHandler
 from .widgets.node_info_panel import NodeInfoPanelWidget
 from .widgets.node_tree import NodeTreeWidget
 
-CSV_HEADERS = [
-    "timestamp_utc",
-    "event_type",
-    "source_name",
-    "message",
-    "severity",
-    "condition_name",
-    "event_id",
-    "condition_id",
-    "retain",
-    "active_state",
-    "acked_state",
-    "raw",
-]
-
 _logger = logging.getLogger("tui")
 RETRO_GREEN = "#8aff80"
 RETRO_AMBER = "#ffbf4d"
 RETRO_RED = "#ff5f5f"
-
-
-@dataclass(frozen=True)
-class ActiveAlarm:
-    """In-memory snapshot of an active alarm/condition keyed by ConditionId."""
-
-    condition_id: str
-    condition_name: str
-    source_name: str
-    message: str
-    severity: str
-    timestamp_utc: str
-    retain: Optional[bool]
-    active_state: Optional[bool]
-    acked_state: Optional[bool]
-    raw: str
 
 
 class HelpScreen(ModalScreen[None]):
@@ -645,31 +615,30 @@ class OpcuaTuiApp(App[None]):
     async def _run_collector_loop(self) -> None:
         if not self._client:
             return
+        client = self._client
         handler = TuiAlarmHandler(self.config.collect.csv_file, self)
-        self._subscription = await self._client.create_subscription(
-            period=self.config.collect.publish_interval_ms,
-            handler=handler,
-        )
-        server_node = self._client.get_node(ua.ObjectIds.Server)
-        # Subscribe to both BaseEventType (general) and ConditionType (Siemens A&C alarms).
-        # where_clause_generation=False prevents asyncua from building a strict EventFilter
-        # WhereClause that Siemens S7-1500 rejects, causing silent event drops.
-        await self._subscription.subscribe_events(
-            sourcenode=server_node,
-            evtypes=[ua.ObjectIds.BaseEventType, ua.ObjectIds.ConditionType],
-            where_clause_generation=False,
-        )
-        _logger.info("Subscribed to BaseEventType and ConditionType events")
 
-        subscription_id = self._subscription.subscription_id
+        self._subscription = await collector_subscribe(
+            client,
+            handler,
+            publish_interval_ms=self.config.collect.publish_interval_ms,
+            # The TUI performs its own ConditionRefresh with a subscription-id
+            # guard so we disable the built-in refresh in the shared helper.
+            enable_condition_refresh=False,
+            is_active=None,
+        )
+
+        subscription = self._subscription
+        server_node = client.get_node(ua.ObjectIds.Server)
+        subscription_id = subscription.subscription_id
 
         async def _run_condition_refresh() -> None:
             await asyncio.sleep(2.0)
             if (
                 self._shutdown_requested
-                or not self._client
-                or not self._subscription
-                or self._subscription.subscription_id != subscription_id
+                or self._client is not client
+                or self._subscription is not subscription
+                or getattr(self._subscription, "subscription_id", None) != subscription_id
             ):
                 _logger.info(
                     "Skipping ConditionRefresh for SubscriptionId=%s: client or subscription no longer active",
@@ -683,9 +652,9 @@ class OpcuaTuiApp(App[None]):
                 logger=_logger,
                 is_active=lambda: (
                     not self._shutdown_requested
-                    and self._client is not None
-                    and self._subscription is not None
-                    and self._subscription.subscription_id == subscription_id
+                    and self._client is client
+                    and self._subscription is subscription
+                    and getattr(self._subscription, "subscription_id", None) == subscription_id
                 ),
             )
 
