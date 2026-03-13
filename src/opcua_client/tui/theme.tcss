@@ -66,6 +66,21 @@ Footer {
     border-title-color: #ffbf4d;
 }
 
+#node-search {
+    border: round #2a7d3e;
+    background: #071207;
+    margin-bottom: 1;
+    color: #8aff80;
+}
+
+#node-search:focus {
+    border: round #6ee768;
+}
+
+#node-search > .input--placeholder {
+    color: #2a7d3e;
+}
+
 .panel-title {
     color: #ffbf4d;
     text-style: bold;

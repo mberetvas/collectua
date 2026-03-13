@@ -13,12 +13,13 @@ from typing import Any, Dict, Mapping, Optional
 
 from asyncua import Client, ua
 from rich.text import Text
+from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane
 
 from opcua_client.runtime_config import RuntimeConfig
 from opcua_client.cert_paths import ensure_client_certificates
@@ -269,6 +270,7 @@ class OpcuaTuiApp(App[None]):
         Binding("f1", "help", "Help"),
         Binding("f8", "toggle_logs", "Toggle Logs"),
         Binding("f9", "toggle_config", "Toggle Config"),
+        Binding("/", "focus_search", "Search"),
         Binding("tab", "focus_next_panel", "Next Panel"),
         Binding("right", "expand_or_focus_right", "Expand/Right", show=False),
         Binding("left", "collapse_or_focus_left", "Collapse/Left", show=False),
@@ -290,12 +292,16 @@ class OpcuaTuiApp(App[None]):
         self._pending_focus_first_child_node_ids: set[str] = set()
         # 0 = default layout, 1 = right-column logs, 2 = full-screen logs
         self._log_mode: int = 0
+        self._search_query: str = ""
+        self._search_results: list[Any] = []
+        self._search_index: int = 0
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield ConnectionStatusWidget(id="connection-status")
         with Horizontal(id="main-grid"):
             with Vertical(id="left-column"):
+                yield Input(placeholder="Search loaded nodes...", id="node-search")
                 yield NodeTreeWidget(id="node-tree")
                 yield ConfigPanel(id="config-panel")
             with Vertical(id="right-column"):
@@ -823,6 +829,58 @@ class OpcuaTuiApp(App[None]):
             return
 
         tree.focus_next_sibling(node)
+
+    def action_focus_search(self) -> None:
+        search_input = self.query_one("#node-search", Input)
+        search_input.focus()
+
+    @on(Input.Submitted, "#node-search")
+    def action_search_nodes(self, event: Input.Submitted) -> None:
+        query = event.value.strip().lower()
+        tree = self.query_one("#node-tree", NodeTreeWidget)
+
+        if not query:
+            self._search_query = ""
+            self._search_results = []
+            event.control.border_title = ""
+            return
+
+        if self._search_query != query:
+            self._search_query = query
+            self._search_results = []
+            self._search_index = 0
+
+            def _search_recursive(node: Any) -> None:
+                if tree.is_placeholder_node(node):
+                    return
+
+                node_data = getattr(node, "data", None)
+                if isinstance(node_data, dict):
+                    name = str(node_data.get("name", "")).lower()
+                    if query in name:
+                        self._search_results.append(node)
+
+                for child in node.children:
+                    _search_recursive(child)
+
+            _search_recursive(tree.root)
+        else:
+            if self._search_results:
+                self._search_index = (self._search_index + 1) % len(self._search_results)
+
+        if self._search_results:
+            target_node = self._search_results[self._search_index]
+
+            parent = getattr(target_node, "parent", None)
+            while parent is not None:
+                if getattr(parent, "allow_expand", False) and not getattr(parent, "is_expanded", False):
+                    parent.expand()
+                parent = getattr(parent, "parent", None)
+
+            tree.focus_node(target_node)
+            event.control.border_title = f"Matches ({self._search_index + 1}/{len(self._search_results)})"
+        else:
+            event.control.border_title = "No matches"
 
     def action_toggle_main_tab(self) -> None:
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
