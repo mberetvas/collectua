@@ -47,8 +47,12 @@ async def browse_nodes(node: Node):
     """
     node_class = await node.read_node_class()
     children = []
-    for child in await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable):
+    for child in await node.get_children(
+        nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
+    ):
         children.append(await browse_nodes(child))
+    if children:
+        children.sort(key=lambda c: str(c.get("name", "")).lower())
     if node_class != ua.NodeClass.Variable:
         var_type = None
     else:

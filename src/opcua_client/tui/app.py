@@ -527,10 +527,15 @@ class OpcuaTuiApp(App[None]):
         children: list[dict[str, Any]] = []
 
         if depth < max_depth and node_class == ua.NodeClass.Object:
-            for child in await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable):
+            for child in await node.get_children(
+                nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
+            ):
                 child_tree = await self._browse_nodes(child, depth + 1, max_depth, target_namespaces)
                 if child_tree:
                     children.append(child_tree)
+
+        if children:
+            children.sort(key=lambda c: str(c.get("name", "")).lower())
 
         include_node = depth == 0 or is_target_namespace or bool(children)
         if not include_node:

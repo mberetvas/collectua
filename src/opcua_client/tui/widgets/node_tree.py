@@ -114,6 +114,8 @@ class NodeTreeWidget(Tree[dict[str, Any]]):
         icon = "📁"
         if node_class == "Variable":
             icon = "📊"
+        elif node_class == "Method":
+            icon = "⚙"
 
         label = f"{icon} {name} [{node_id}] ({node_class})"
         if var_type:

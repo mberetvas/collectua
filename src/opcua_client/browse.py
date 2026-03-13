@@ -29,8 +29,22 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
     child_lines: list[str] = []
 
     if depth < max_depth:
-        for child in await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable):
-            child_lines.extend(await _browse_recursive(child, depth + 1, max_depth, target_namespaces))
+        children = await node.get_children(
+            nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
+        )
+
+        named_children: list[tuple[str, Any]] = []
+        for child in children:
+            try:
+                display_name = (await child.read_display_name()).Text
+            except ua.UaError:
+                display_name = ""
+            named_children.append((display_name, child))
+
+        for _name, child in sorted(named_children, key=lambda item: item[0].lower()):
+            child_lines.extend(
+                await _browse_recursive(child, depth + 1, max_depth, target_namespaces)
+            )
 
     include_self = is_target_namespace or bool(child_lines)
     if not include_self:
