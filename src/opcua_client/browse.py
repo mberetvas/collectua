@@ -8,7 +8,7 @@ import logging
 
 from asyncua import Client, ua
 
-MAX_DEPTH = 3
+MAX_DEPTH = 10
 TIMEOUT = 30.0
 
 _logger = logging.getLogger("asyncua")
@@ -42,9 +42,7 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
             named_children.append((display_name, child))
 
         for _name, child in sorted(named_children, key=lambda item: item[0].lower()):
-            child_lines.extend(
-                await _browse_recursive(child, depth + 1, max_depth, target_namespaces)
-            )
+            child_lines.extend(await _browse_recursive(child, depth + 1, max_depth, target_namespaces))
 
     include_self = is_target_namespace or bool(child_lines)
     if not include_self:
