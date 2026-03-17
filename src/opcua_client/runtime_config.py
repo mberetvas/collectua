@@ -4,63 +4,69 @@ import json
 
 from dataclasses import asdict, dataclass, field
 
+from .env_defaults import get_bool, get_float, get_int, get_int_list, get_str
+
 
 @dataclass
 class FileLoggingConfig:
     """Per-connection file logging configuration."""
 
-    enabled: bool = False
-    path: str = "logs/debug"
-    name_pattern: str = "debug-{timestamp}-pid{pid}.log"
+    enabled: bool = field(default_factory=lambda: get_bool("OPCUA_LOG_FILE_ENABLED", False))
+    path: str = field(default_factory=lambda: get_str("OPCUA_LOG_FILE_PATH", "logs/debug"))
+    name_pattern: str = field(
+        default_factory=lambda: get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log")
+    )
 
 
 @dataclass
 class LoggingConfig:
     """Per-connection logging configuration."""
 
-    level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    level: str = field(
+        default_factory=lambda: get_str("OPCUA_LOG_LEVEL", "INFO")
+    )  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     file: FileLoggingConfig = field(default_factory=FileLoggingConfig)
 
 
 @dataclass
 class ConnectionConfig:
-    url: str
-    timeout: float
-    session_timeout: int = 60000
-    request_timeout: int = 20000
-    username: str = ""
-    password: str = ""
-    auth_policy: str = "None"
-    security_mode: str = "None_"
-    cert_file: str = ""
-    key_file: str = ""
-    server_cert: str = ""
-    trust_cert: bool = False
+    url: str = field(default_factory=lambda: get_str("OPCUA_URL", ""))
+    timeout: float = field(default_factory=lambda: get_float("OPCUA_TIMEOUT", 30.0))
+    session_timeout: int = field(default_factory=lambda: get_int("OPCUA_SESSION_TIMEOUT", 60000))
+    request_timeout: int = field(default_factory=lambda: get_int("OPCUA_REQUEST_TIMEOUT", 20000))
+    username: str = field(default_factory=lambda: get_str("OPCUA_USERNAME", ""))
+    password: str = field(default_factory=lambda: get_str("OPCUA_PASSWORD", ""))
+    auth_policy: str = field(default_factory=lambda: get_str("OPCUA_AUTH_POLICY", "None"))
+    security_mode: str = field(default_factory=lambda: get_str("OPCUA_SECURITY_MODE", "None_"))
+    cert_file: str = field(default_factory=lambda: get_str("OPCUA_CERT_FILE", ""))
+    key_file: str = field(default_factory=lambda: get_str("OPCUA_KEY_FILE", ""))
+    server_cert: str = field(default_factory=lambda: get_str("OPCUA_SERVER_CERT", ""))
+    trust_cert: bool = field(default_factory=lambda: get_bool("OPCUA_TRUST_CERT", False))
     logging_config: LoggingConfig | None = None
 
 
 @dataclass
 class BrowseConfig:
-    max_depth: int = 3
-    target_namespaces: list[int] = field(default_factory=list)
+    max_depth: int = field(default_factory=lambda: get_int("OPCUA_MAX_DEPTH", 3))
+    target_namespaces: list[int] = field(default_factory=lambda: get_int_list("OPCUA_TARGET_NAMESPACES", []))
 
 
 @dataclass
 class CollectConfig:
-    csv_file: str = "alarms.csv"
-    publish_interval_ms: int = 500
-    reconnect_delay_sec: int = 5
+    csv_file: str = field(default_factory=lambda: get_str("OPCUA_CSV_FILE", "alarms.csv"))
+    publish_interval_ms: int = field(default_factory=lambda: get_int("OPCUA_PUBLISH_INTERVAL_MS", 500))
+    reconnect_delay_sec: int = field(default_factory=lambda: get_int("OPCUA_RECONNECT_DELAY_SEC", 5))
 
 
 @dataclass
 class RuntimeConfig:
-    command: str
-    log_level: str
-    connection: ConnectionConfig
-    browse: BrowseConfig
-    collect: CollectConfig
-    mode: str = "prod"
-    debug_log_dir: str = "logs/debug"
+    command: str = ""
+    log_level: str = field(default_factory=lambda: get_str("OPCUA_LOG_LEVEL", "INFO"))
+    connection: ConnectionConfig = field(default_factory=ConnectionConfig)
+    browse: BrowseConfig = field(default_factory=BrowseConfig)
+    collect: CollectConfig = field(default_factory=CollectConfig)
+    mode: str = field(default_factory=lambda: get_str("OPCUA_MODE", "prod"))
+    debug_log_dir: str = field(default_factory=lambda: get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"))
 
     @classmethod
     def from_namespace(cls, args) -> "RuntimeConfig":
@@ -71,46 +77,53 @@ class RuntimeConfig:
             file_dict = logging_dict.get("file", {})
             if isinstance(file_dict, dict):
                 file_config = FileLoggingConfig(
-                    enabled=file_dict.get("enabled", False),
-                    path=file_dict.get("path", "logs/debug"),
-                    name_pattern=file_dict.get("name_pattern", "debug-{timestamp}-pid{pid}.log"),
+                    enabled=file_dict.get("enabled", get_bool("OPCUA_LOG_FILE_ENABLED", False)),
+                    path=file_dict.get("path", get_str("OPCUA_LOG_FILE_PATH", "logs/debug")),
+                    name_pattern=file_dict.get(
+                        "name_pattern",
+                        get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log"),
+                    ),
                 )
             else:
                 file_config = FileLoggingConfig()
 
             logging_config = LoggingConfig(
-                level=logging_dict.get("level", "INFO"),
+                level=logging_dict.get("level", get_str("OPCUA_LOG_LEVEL", "INFO")),
                 file=file_config,
             )
 
         return cls(
             command=getattr(args, "command", ""),
-            log_level=getattr(args, "log_level", "INFO"),
-            mode=getattr(args, "mode", "prod"),
-            debug_log_dir=getattr(args, "debug_log_dir", "logs/debug"),
+            log_level=getattr(args, "log_level", get_str("OPCUA_LOG_LEVEL", "INFO")),
+            mode=getattr(args, "mode", get_str("OPCUA_MODE", "prod")),
+            debug_log_dir=getattr(args, "debug_log_dir", get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug")),
             connection=ConnectionConfig(
-                url=getattr(args, "url", ""),
-                timeout=float(getattr(args, "timeout", 30.0)),
-                session_timeout=int(getattr(args, "session_timeout", 60000)),
-                request_timeout=int(getattr(args, "request_timeout", 20000)),
-                username=getattr(args, "username", ""),
-                password=getattr(args, "password", ""),
-                auth_policy=getattr(args, "auth_policy", "None"),
-                security_mode=getattr(args, "security_mode", "None_"),
-                cert_file=getattr(args, "cert_file", ""),
-                key_file=getattr(args, "key_file", ""),
-                server_cert=getattr(args, "server_cert", ""),
-                trust_cert=bool(getattr(args, "trust_cert", False)),
+                url=getattr(args, "url", get_str("OPCUA_URL", "")),
+                timeout=float(getattr(args, "timeout", get_float("OPCUA_TIMEOUT", 30.0))),
+                session_timeout=int(getattr(args, "session_timeout", get_int("OPCUA_SESSION_TIMEOUT", 60000))),
+                request_timeout=int(getattr(args, "request_timeout", get_int("OPCUA_REQUEST_TIMEOUT", 20000))),
+                username=getattr(args, "username", get_str("OPCUA_USERNAME", "")),
+                password=getattr(args, "password", get_str("OPCUA_PASSWORD", "")),
+                auth_policy=getattr(args, "auth_policy", get_str("OPCUA_AUTH_POLICY", "None")),
+                security_mode=getattr(args, "security_mode", get_str("OPCUA_SECURITY_MODE", "None_")),
+                cert_file=getattr(args, "cert_file", get_str("OPCUA_CERT_FILE", "")),
+                key_file=getattr(args, "key_file", get_str("OPCUA_KEY_FILE", "")),
+                server_cert=getattr(args, "server_cert", get_str("OPCUA_SERVER_CERT", "")),
+                trust_cert=bool(getattr(args, "trust_cert", get_bool("OPCUA_TRUST_CERT", False))),
                 logging_config=logging_config,
             ),
             browse=BrowseConfig(
-                max_depth=int(getattr(args, "max_depth", 3)),
-                target_namespaces=[int(ns) for ns in getattr(args, "target_namespace", [])],
+                max_depth=int(getattr(args, "max_depth", get_int("OPCUA_MAX_DEPTH", 3))),
+                target_namespaces=[
+                    int(ns) for ns in getattr(args, "target_namespace", get_int_list("OPCUA_TARGET_NAMESPACES", []))
+                ],
             ),
             collect=CollectConfig(
-                csv_file=getattr(args, "csv_file", "alarms.csv"),
-                publish_interval_ms=int(getattr(args, "publish_interval_ms", 500)),
-                reconnect_delay_sec=int(getattr(args, "reconnect_delay_sec", 5)),
+                csv_file=getattr(args, "csv_file", get_str("OPCUA_CSV_FILE", "alarms.csv")),
+                publish_interval_ms=int(
+                    getattr(args, "publish_interval_ms", get_int("OPCUA_PUBLISH_INTERVAL_MS", 500))
+                ),
+                reconnect_delay_sec=int(getattr(args, "reconnect_delay_sec", get_int("OPCUA_RECONNECT_DELAY_SEC", 5))),
             ),
         )
 

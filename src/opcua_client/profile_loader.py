@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from .env_defaults import get_path
+
 PROFILE_KEYS = {
     "url",
     "timeout",
@@ -23,8 +25,8 @@ PROFILE_KEYS = {
 
 def profile_search_dirs() -> list[Path]:
     return [
-        Path.cwd() / "connections",
-        Path("~/.config/opcua-client/connections").expanduser(),
+        get_path("OPCUA_PROFILE_DIR", "connections", relative_to_cwd=True),
+        get_path("OPCUA_FALLBACK_PROFILE_DIR", "~/.config/opcua-client/connections"),
     ]
 
 

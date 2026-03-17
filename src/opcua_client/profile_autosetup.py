@@ -10,6 +10,7 @@ from typing import Iterable, List
 import yaml
 from asyncua import Client, ua
 
+from .env_defaults import get_float, get_int, get_path
 from .profile_loader import load_profile, profile_search_dirs, resolve_profile_path
 
 
@@ -57,14 +58,14 @@ def _choose_profile_directory_for_creation() -> Path:
     Prefer ./connections/ under the current working directory, falling back to
     ~/.config/opcua-client/connections/ if needed.
     """
-    cwd_dir = Path.cwd() / "connections"
+    cwd_dir = get_path("OPCUA_PROFILE_DIR", "connections", relative_to_cwd=True)
     try:
         cwd_dir.mkdir(parents=True, exist_ok=True)
         return cwd_dir
     except Exception:
         pass
 
-    config_dir = Path("~/.config/opcua-client/connections").expanduser()
+    config_dir = get_path("OPCUA_FALLBACK_PROFILE_DIR", "~/.config/opcua-client/connections")
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir
 
@@ -190,9 +191,9 @@ def ensure_profile_for_url_interactive(url: str) -> str:
 
     payload: dict = {
         "url": url,
-        "timeout": 30.0,
-        "session_timeout": 60000,
-        "request_timeout": 20000,
+        "timeout": get_float("OPCUA_TIMEOUT", 30.0),
+        "session_timeout": get_int("OPCUA_SESSION_TIMEOUT", 60000),
+        "request_timeout": get_int("OPCUA_REQUEST_TIMEOUT", 20000),
         "username": username,
         "password": password,
         "auth_policy": chosen.auth_policy,
@@ -207,4 +208,3 @@ def ensure_profile_for_url_interactive(url: str) -> str:
 
     print(f"Created connection profile '{profile_name}' at {profile_path}")
     return profile_name
-

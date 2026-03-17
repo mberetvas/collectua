@@ -12,6 +12,7 @@ from asyncua import Client, ua
 
 from . import browse, collector
 from .cert_paths import ensure_client_certificates
+from .env_defaults import get_bool, get_formatted_str, get_int_list, get_str
 from .profile_autosetup import ensure_profile_for_url_interactive
 from .profile_loader import list_profiles, load_profile, resolve_profile_path
 from .runtime_config import RuntimeConfig
@@ -50,10 +51,10 @@ def _configure_logging(
     console_level = getattr(logging, console_level_str, logging.INFO)
 
     # Determine file logging settings
-    file_enabled = False
+    file_enabled = get_bool("OPCUA_LOG_FILE_ENABLED", False)
     file_level = logging.DEBUG
     file_dir = Path(debug_log_dir)
-    file_name_pattern = "debug-{timestamp}-pid{pid}.log"
+    file_name_pattern = get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log")
 
     if connection_config and connection_config.logging_config:
         file_config = connection_config.logging_config.file
@@ -212,8 +213,7 @@ async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) 
         cert_path = profile_path.with_suffix(".der")
     else:
         print(
-            "[trust warning] No connection profile associated with this connection; "
-            "server trust will not be persisted."
+            "[trust warning] No connection profile associated with this connection; server trust will not be persisted."
         )
 
     print("")
@@ -251,7 +251,11 @@ async def _connect_smoke(config: RuntimeConfig):
     conn = config.connection
     logger = logging.getLogger("connect")
     client = Client(url=conn.url, timeout=conn.timeout)
-    client.application_uri = f"urn:{socket.gethostname()}:foobar:myclient"
+    client.application_uri = get_formatted_str(
+        "OPCUA_CLIENT_APP_URI_TEMPLATE",
+        "urn:{hostname}:foobar:myclient",
+        hostname=socket.gethostname(),
+    )
     client.session_timeout = conn.session_timeout
     client.uaclient.request_timeout = conn.request_timeout
 
@@ -263,7 +267,10 @@ async def _connect_smoke(config: RuntimeConfig):
     try:
         if conn.security_mode != "None_":
             # Auto-generate or resolve client certificates (client-side).
-            cert_file, key_file = ensure_client_certificates()
+            if conn.cert_file and conn.key_file:
+                cert_file, key_file = conn.cert_file, conn.key_file
+            else:
+                cert_file, key_file = ensure_client_certificates()
             await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
 
         await client.connect()
@@ -285,18 +292,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode",
         choices=["prod", "debug"],
-        default="prod",
+        default=get_str("OPCUA_MODE", "prod"),
         help="Runtime mode: 'prod' (default, INFO level console-only) or 'debug' (DEBUG level with per-run log file)",
     )
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
+        default=get_str("OPCUA_LOG_LEVEL", "INFO"),
         help="Console logging level (overrides mode defaults)",
     )
     parser.add_argument(
         "--debug-log-dir",
-        default="logs/debug",
+        default=get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"),
         help="Directory for debug log files (only used in debug mode)",
     )
     parser.add_argument(
@@ -336,17 +343,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
     )
-    parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
+    parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     parser.add_argument(
         "--target-namespace",
         type=int,
         nargs="*",
-        default=[],
+        default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    parser.add_argument("--csv-file", default="alarms.csv", help="Output CSV file path")
-    parser.add_argument("--publish-interval-ms", type=int, default=500, help="Subscription publish interval")
-    parser.add_argument("--reconnect-delay-sec", type=int, default=5, help="Reconnect delay in seconds")
+    parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
+    parser.add_argument(
+        "--publish-interval-ms", type=int, default=collector.PUBLISH_INTERVAL_MS, help="Subscription publish interval"
+    )
+    parser.add_argument(
+        "--reconnect-delay-sec", type=int, default=collector.RECONNECT_DELAY_SEC, help="Reconnect delay in seconds"
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -365,7 +376,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--target-namespace",
         type=int,
         nargs="*",
-        default=[],
+        default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
     browse_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
@@ -461,7 +472,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--target-namespace",
         type=int,
         nargs="*",
-        default=[],
+        default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
     config_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")

@@ -5,13 +5,42 @@ Connect to S1500 OPC UA server (no security) and print the address space tree.
 
 import asyncio
 import logging
+from typing import Any
 
 from asyncua import Client, ua
 
-MAX_DEPTH = 10
-TIMEOUT = 30.0
+from .env_defaults import get_float, get_int
+
+MAX_DEPTH = get_int("OPCUA_MAX_DEPTH", 10)
+TIMEOUT = get_float("OPCUA_TIMEOUT", 30.0)
 
 _logger = logging.getLogger("asyncua")
+
+
+async def _node_sort_name(node: Any) -> str:
+    """Resolve a stable display name for sorting child nodes."""
+    read_display_name = getattr(node, "read_display_name", None)
+    if callable(read_display_name):
+        try:
+            display_name = await read_display_name()
+            text = getattr(display_name, "Text", None)
+            if isinstance(text, str):
+                return text
+        except ua.UaError:
+            pass
+
+    read_browse_name = getattr(node, "read_browse_name", None)
+    if callable(read_browse_name):
+        try:
+            browse_name = await read_browse_name()
+            to_string = getattr(browse_name, "to_string", None)
+            if callable(to_string):
+                return str(to_string())
+            return str(browse_name)
+        except ua.UaError:
+            pass
+
+    return str(getattr(node, "name", ""))
 
 
 async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces: set[int]) -> list[str]:
@@ -35,10 +64,7 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
 
         named_children: list[tuple[str, Any]] = []
         for child in children:
-            try:
-                display_name = (await child.read_display_name()).Text
-            except ua.UaError:
-                display_name = ""
+            display_name = await _node_sort_name(child)
             named_children.append((display_name, child))
 
         for _name, child in sorted(named_children, key=lambda item: item[0].lower()):

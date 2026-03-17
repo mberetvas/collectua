@@ -1,6 +1,8 @@
 import argparse
 import sys
 
+from opcua_client import browse, collector
+from opcua_client.env_defaults import get_int_list, get_str
 from opcua_client.profile_loader import list_profiles, load_profile
 from opcua_client.runtime_config import RuntimeConfig
 
@@ -12,14 +14,23 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="opcua-tui",
         description="OPC UA command center TUI (htop/btop-inspired)",
     )
-    parser.add_argument("--mode", choices=["prod", "debug"], default="prod", help="Runtime mode")
+    parser.add_argument(
+        "--mode",
+        choices=["prod", "debug"],
+        default=get_str("OPCUA_MODE", "prod"),
+        help="Runtime mode",
+    )
     parser.add_argument(
         "--log-level",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        default="INFO",
+        default=get_str("OPCUA_LOG_LEVEL", "INFO"),
         help="Console logging level",
     )
-    parser.add_argument("--debug-log-dir", default="logs/debug", help="Directory for debug log files")
+    parser.add_argument(
+        "--debug-log-dir",
+        default=get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"),
+        help="Directory for debug log files",
+    )
 
     parser.add_argument(
         "--connection-profile",
@@ -52,17 +63,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
     )
 
-    parser.add_argument("--max-depth", type=int, default=3, help="Browse depth")
+    parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     parser.add_argument(
         "--target-namespace",
         type=int,
         nargs="*",
-        default=[],
+        default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    parser.add_argument("--csv-file", default="alarms.csv", help="Output CSV file path")
-    parser.add_argument("--publish-interval-ms", type=int, default=500, help="Subscription publish interval")
-    parser.add_argument("--reconnect-delay-sec", type=int, default=5, help="Reconnect delay in seconds")
+    parser.add_argument(
+        "--csv-file",
+        default=collector.CSV_FILE,
+        help="Output CSV file path",
+    )
+    parser.add_argument(
+        "--publish-interval-ms",
+        type=int,
+        default=collector.PUBLISH_INTERVAL_MS,
+        help="Subscription publish interval",
+    )
+    parser.add_argument(
+        "--reconnect-delay-sec",
+        type=int,
+        default=collector.RECONNECT_DELAY_SEC,
+        help="Reconnect delay in seconds",
+    )
 
     return parser
 

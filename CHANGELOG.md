@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **TUI multi-node selection and bulk Node ID copy** - Select multiple nodes in the Node Tree and copy all Node IDs as newline-separated output for bulk operations
+  - Added `Ctrl+Space` to toggle selection of the currently focused node in the Node Tree
+  - Added `Esc` to clear the current multi-selection set in the Node Tree
+  - Updated `Ctrl+Shift+C` to copy all selected Node IDs, with fallback to the currently focused node when no multi-selection exists
+  - Added visual selected-row marker (`☑`) in the Node Tree for selected nodes
 - **Per-connection logging configuration** - Define logging behavior directly in connection YAML profiles
   - Configure log level per connection: `logging.level: DEBUG|INFO|WARNING|ERROR|CRITICAL`
   - Enable/disable file logging per connection: `logging.file.enabled: true|false`
@@ -21,8 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - On first secure connection when `trust_cert` is false, the CLI collects the server certificate, shows its fingerprint, and prompts the user to trust it
   - When a profile is used, accepting trust writes the collected server certificate next to the profile YAML and persists `trust_cert: true`
   - Connections without a backing profile can still be trusted for the current run, but trust is not persisted
+- **TUI Node ID quick copy** - Added a `Copy Node ID` button and `Ctrl+Shift+C` shortcut in Node Info to copy the selected node identifier to the system clipboard
 
 ### Changed
+- **Centralized package defaults in `src/opcua_client/.env`**
+  - Runtime defaults for CLI, TUI, collector, browse depth, logging, certificate paths, and profile directories are now sourced from `src/opcua_client/.env`
+  - Configuration precedence is now CLI args > connection profile YAML > `.env` defaults > code fallback
+  - Auto-profile setup now reuses `.env` timeout defaults so generated profiles stay aligned with the rest of the app
 - **BREAKING: TUI launch method changed** - Use `collectua --tui` instead of separate `opcua-tui` command
   - The `opcua-tui` command has been removed as a separate entry point
   - Instead, use `collectua --tui` to launch the terminal dashboard
@@ -32,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Shell alias example: `alias opcua-tui='collectua --tui'` for legacy compatibility
 
 ### Fixed
+- **Explicit secure client certificate paths are now honored**
+  - Secure CLI and TUI connections now use configured `cert_file` and `key_file` values when present
+  - Auto-generated certificates remain the fallback when explicit paths are not supplied
 - **Siemens S7-1500 alarm/event visibility in TUI and collector**
   - Subscriptions now request both `BaseEventType` (general events) and `ConditionType` (Siemens OPC UA Alarms & Conditions) simultaneously
   - Added `where_clause_generation=False` to prevent asyncua from sending a strict EventFilter WhereClause that Siemens S7-1500 OPC UA server rejects, which previously caused all incoming events to be silently dropped

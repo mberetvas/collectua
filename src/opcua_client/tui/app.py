@@ -25,6 +25,7 @@ from opcua_client.runtime_config import RuntimeConfig
 from opcua_client.cert_paths import ensure_client_certificates
 from opcua_client.condition_refresh import condition_refresh_with_retry
 from opcua_client.collector import CSV_HEADERS, ActiveAlarm, subscribe as collector_subscribe
+from opcua_client.env_defaults import get_formatted_str
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
@@ -49,6 +50,9 @@ class HelpScreen(ModalScreen[None]):
                     "[b]OPC UA TUI Help[/b]",
                     "",
                     "Tab: Focus next panel",
+                    "Ctrl+Space: Toggle node multi-selection",
+                    "Esc: Clear node multi-selection",
+                    "Ctrl+Shift+C: Copy selected Node IDs",
                     "↑/↓: Previous/next sibling node (when Node Tree is focused)",
                     "→: Expand node or focus first child",
                     "←: Collapse node or focus parent",
@@ -115,7 +119,9 @@ class StartupSplashScreen(ModalScreen[None]):
             splash.update(Text("\n".join(rendered), style=f"bold {RETRO_GREEN}"))
             await asyncio.sleep(0.08)
 
-        splash.update(Text("\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]), style=f"bold {RETRO_GREEN}"))
+        splash.update(
+            Text("\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]), style=f"bold {RETRO_GREEN}")
+        )
         await asyncio.sleep(0.65)
         self.dismiss(None)
 
@@ -267,6 +273,9 @@ class OpcuaTuiApp(App[None]):
         Binding("f5", "reconnect", "Reconnect"),
         Binding("f6", "toggle_main_tab", "Toggle Main Tab"),
         Binding("shift+f6", "show_alarm_tab", "Show Alarms"),
+        Binding("ctrl+space", "toggle_node_selection", "Toggle Node Selection"),
+        Binding("escape", "clear_node_selection", "Clear Node Selection"),
+        Binding("ctrl+shift+c", "copy_selected_node_id", "Copy Node IDs"),
         Binding("f1", "help", "Help"),
         Binding("f8", "toggle_logs", "Toggle Logs"),
         Binding("f9", "toggle_config", "Toggle Config"),
@@ -407,7 +416,11 @@ class OpcuaTuiApp(App[None]):
     async def _create_client(self) -> Client:
         conn = self.config.connection
         client = Client(url=conn.url, timeout=conn.timeout)
-        client.application_uri = f"urn:{socket.gethostname()}:foobar:myclient"
+        client.application_uri = get_formatted_str(
+            "OPCUA_CLIENT_APP_URI_TEMPLATE",
+            "urn:{hostname}:foobar:myclient",
+            hostname=socket.gethostname(),
+        )
         client.session_timeout = conn.session_timeout
         client.uaclient.request_timeout = conn.request_timeout
 
@@ -418,17 +431,22 @@ class OpcuaTuiApp(App[None]):
 
         if conn.security_mode != "None_":
             # Always use the global/default client certificate material for secure connections.
-            cert_file, key_file = ensure_client_certificates()
+            if conn.cert_file and conn.key_file:
+                cert_file, key_file = conn.cert_file, conn.key_file
+            else:
+                cert_file, key_file = ensure_client_certificates()
             await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
             selected_endpoint_app_uri = ""
             try:
                 eps = await client.connect_and_get_server_endpoints()
                 for ep in eps:
-                    policy_short = ((getattr(ep, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None")
+                    policy_short = (getattr(ep, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
                     mode_name = getattr(getattr(ep, "SecurityMode", None), "name", "")
                     normalized_mode = "None_" if mode_name == "None" else mode_name
                     if policy_short == conn.auth_policy and normalized_mode == conn.security_mode:
-                        selected_endpoint_app_uri = str(getattr(getattr(ep, "Server", None), "ApplicationUri", "") or "")
+                        selected_endpoint_app_uri = str(
+                            getattr(getattr(ep, "Server", None), "ApplicationUri", "") or ""
+                        )
                         break
             except Exception:
                 pass
@@ -687,6 +705,7 @@ class OpcuaTuiApp(App[None]):
 
     def on_node_tree_data(self, message: NodeTreeData) -> None:
         self.query_one(NodeTreeWidget).set_tree_data(message.tree_data)
+        self.query_one(NodeInfoPanelWidget).set_copy_feedback("")
 
     def on_tree_node_selected(self, event) -> None:
         if event.node.data:
@@ -754,6 +773,70 @@ class OpcuaTuiApp(App[None]):
     def action_toggle_config(self) -> None:
         panel = self.query_one("#config-panel")
         panel.display = not panel.display
+
+    def action_toggle_node_selection(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        node_id, is_selected = tree.toggle_cursor_selection()
+        panel = self.query_one(NodeInfoPanelWidget)
+        if not node_id:
+            panel.set_copy_feedback("Current row is not selectable.")
+            return
+
+        if is_selected:
+            panel.set_copy_feedback(f"Added to selection: {node_id}")
+        else:
+            panel.set_copy_feedback(f"Removed from selection: {node_id}")
+
+    def action_clear_node_selection(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        if not tree.has_focus:
+            return
+
+        cleared = tree.clear_selected_nodes()
+        panel = self.query_one(NodeInfoPanelWidget)
+        if cleared:
+            panel.set_copy_feedback(f"Cleared selection ({cleared} node IDs).")
+        else:
+            panel.set_copy_feedback("No node selections to clear.")
+
+    def _copy_node_id_to_clipboard(self, node_ids: list[str]) -> None:
+        panel = self.query_one(NodeInfoPanelWidget)
+
+        if not node_ids:
+            panel.set_copy_feedback("No node selected to copy.")
+            return
+
+        payload = "\n".join(node_ids)
+        try:
+            self.copy_to_clipboard(payload)
+            if len(node_ids) == 1:
+                panel.set_copy_feedback(f"Copied Node ID: {node_ids[0]}")
+                _logger.info("Copied selected Node ID to clipboard")
+            else:
+                panel.set_copy_feedback(f"Copied {len(node_ids)} Node IDs")
+                _logger.info("Copied %d selected Node IDs to clipboard", len(node_ids))
+        except Exception as exc:
+            panel.set_copy_feedback(f"Copy failed: {exc}")
+            _logger.exception("Failed to copy selected Node ID to clipboard")
+
+    def action_copy_selected_node_id(self) -> None:
+        tree = self.query_one(NodeTreeWidget)
+        selected_node_ids = tree.get_selected_node_ids()
+        if selected_node_ids:
+            self._copy_node_id_to_clipboard(selected_node_ids)
+            return
+
+        node_id: str | None = None
+        if self._selected_node:
+            node_id = str(self._selected_node.get("id", "")) or None
+        self._copy_node_id_to_clipboard([node_id] if node_id else [])
+
+    @on(NodeInfoPanelWidget.CopyNodeIdRequested)
+    def on_node_info_copy_requested(self, message: NodeInfoPanelWidget.CopyNodeIdRequested) -> None:
+        self.action_copy_selected_node_id()
 
     async def action_reconnect(self) -> None:
         _logger.info("Manual reconnect requested")

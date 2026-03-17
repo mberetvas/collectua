@@ -19,12 +19,13 @@ from typing import Any, Callable, Dict, Mapping, Optional, Protocol
 from asyncua import Client, ua
 
 from opcua_client.condition_refresh import condition_refresh_with_retry
+from opcua_client.env_defaults import get_float, get_int, get_str
 
 # ──────────────────────── CONFIG ────────────────────────
-CSV_FILE = "alarms.csv"
-PUBLISH_INTERVAL_MS = 500
-RECONNECT_DELAY_SEC = 5
-TIMEOUT = 30.0
+CSV_FILE = get_str("OPCUA_CSV_FILE", "alarms.csv")
+PUBLISH_INTERVAL_MS = get_int("OPCUA_PUBLISH_INTERVAL_MS", 500)
+RECONNECT_DELAY_SEC = get_int("OPCUA_RECONNECT_DELAY_SEC", 5)
+TIMEOUT = get_float("OPCUA_TIMEOUT", 30.0)
 # ────────────────────────────────────────────────────────
 
 CSV_HEADERS = [
@@ -242,6 +243,7 @@ async def subscribe(
     _logger.info("Subscribed to BaseEventType and ConditionType alarms & events")
 
     if enable_condition_refresh:
+
         async def _run_condition_refresh() -> None:
             # Delay ConditionRefresh slightly so the subscription is fully established.
             await asyncio.sleep(2.0)

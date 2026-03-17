@@ -5,37 +5,49 @@ import socket
 from dataclasses import dataclass
 from asyncua import Client, Node, ua
 
+from opcua_client.env_defaults import get_float, get_formatted_str, get_int, get_str
+
 
 @dataclass
 class ClientConfigSecure:
-    url: str = "opc.tcp://10.205.139.4:4840"
-    username: str = "OPCGB"
-    password: str = "OPCgb123!"
-    auth_policy: str = "Basic256"  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
-    security_mode: str = "Sign"  # Options: "None_", "Sign", "SignAndEncrypt"
-    cert_file: str = "/home/administrator/dev_projects/opcua_client/my-certs/opcua_certs/own/certs/MyOPCUAClient.der"
-    key_file: str = (
-        "/home/administrator/dev_projects/opcua_client/my-certs/opcua_certs/own/private/MyOPCUAClient_key.pem"
-    )
+    url: str = get_str("OPCUA_EXAMPLE_URL", "opc.tcp://10.205.139.4:4840")
+    username: str = get_str("OPCUA_EXAMPLE_USERNAME", "OPCGB")
+    password: str = get_str("OPCUA_EXAMPLE_PASSWORD", "OPCgb123!")
+    auth_policy: str = get_str(
+        "OPCUA_EXAMPLE_AUTH_POLICY", "Basic256"
+    )  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
+    security_mode: str = get_str("OPCUA_EXAMPLE_SECURITY_MODE", "Sign")  # Options: "None_", "Sign", "SignAndEncrypt"
+    cert_file: str = get_str("OPCUA_EXAMPLE_CERT_FILE", "")
+    key_file: str = get_str("OPCUA_EXAMPLE_KEY_FILE", "")
     log_level: int = logging.INFO
-    timeout: float = 30.0  # Socket communication timeout in seconds
-    session_timeout: int = 60000  # Session timeout in milliseconds (negotiated with server)
-    request_timeout: int = 20000  # Individual request timeout in milliseconds for session activation and operations
+    timeout: float = get_float("OPCUA_EXAMPLE_TIMEOUT", 30.0)  # Socket communication timeout in seconds
+    session_timeout: int = get_int(
+        "OPCUA_EXAMPLE_SESSION_TIMEOUT", 60000
+    )  # Session timeout in milliseconds (negotiated with server)
+    request_timeout: int = get_int(
+        "OPCUA_EXAMPLE_REQUEST_TIMEOUT", 20000
+    )  # Individual request timeout in milliseconds for session activation and operations
 
 
 @dataclass
 class ClientConfigInsecure:
-    url: str = "opc.tcp://10.205.139.4:4840"
+    url: str = get_str("OPCUA_EXAMPLE_URL", "opc.tcp://10.205.139.4:4840")
     username: str = ""
     password: str = ""
-    auth_policy: str = "None"  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
-    security_mode: str = "None_"  # Options: "None_", "Sign", "SignAndEncrypt"
+    auth_policy: str = get_str(
+        "OPCUA_AUTH_POLICY", "None"
+    )  # Options: "None" (for None_ mode), "Basic128Rsa15", "Basic256", "Basic256Sha256"
+    security_mode: str = get_str("OPCUA_SECURITY_MODE", "None_")  # Options: "None_", "Sign", "SignAndEncrypt"
     cert_file: str = ""
     key_file: str = ""
     log_level: int = logging.INFO
-    timeout: float = 30.0  # Socket communication timeout in seconds
-    session_timeout: int = 60000  # Session timeout in milliseconds (negotiated with server)
-    request_timeout: int = 20000  # Individual request timeout in milliseconds for session activation and operations
+    timeout: float = get_float("OPCUA_TIMEOUT", 30.0)  # Socket communication timeout in seconds
+    session_timeout: int = get_int(
+        "OPCUA_SESSION_TIMEOUT", 60000
+    )  # Session timeout in milliseconds (negotiated with server)
+    request_timeout: int = get_int(
+        "OPCUA_REQUEST_TIMEOUT", 20000
+    )  # Individual request timeout in milliseconds for session activation and operations
 
 
 _logger = logging.getLogger("asyncua")
@@ -96,7 +108,11 @@ async def task(config: ClientConfigInsecure):
     try:
         client = Client(url=config.url, timeout=config.timeout)
         # Matches the URI defined in generate_certificates.py
-        client.application_uri = f"urn:{socket.gethostname()}:foobar:myclient"
+        client.application_uri = get_formatted_str(
+            "OPCUA_CLIENT_APP_URI_TEMPLATE",
+            "urn:{hostname}:foobar:myclient",
+            hostname=socket.gethostname(),
+        )
         # Configure session and request timeouts before connection
         client.session_timeout = config.session_timeout
         client.uaclient.request_timeout = config.request_timeout

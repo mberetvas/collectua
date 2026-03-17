@@ -48,6 +48,8 @@ Want to automate certificates? Already handled — it will create them as needed
   - Live alarm/event monitor (AlarmTableWidget)
   - OPC UA node explorer/tree (NodeTreeWidget)
   - Node value/details panel (NodeInfoPanelWidget)
+  - Multi-node selection and bulk copy from Node Tree (`Ctrl+Space` to toggle selection, `Esc` to clear, `Ctrl+Shift+C` to copy selected Node IDs)
+  - Copy Node ID directly from Node Info (button uses same copy behavior)
   - Log stream, so you can feel productive
   - 1995-style tabbed panels & help screen
 - **CLI:**
@@ -63,11 +65,38 @@ Want to automate certificates? Already handled — it will create them as needed
 
 ## Configuration
 
+- Package-wide runtime defaults are centralized in `src/opcua_client/.env`
+- The application resolves configuration with this precedence: CLI args > connection profile YAML > `.env` defaults > code fallback
 - Connection profiles are YAML blobs squirrelled in `./connections` or `~/.config/opcua-client/connections`
 - To auto-create profiles, provide a URL without one. You'll get prompted more than at airport security.
 - Security modes: "None_", "Sign", "SignAndEncrypt" (actual security feeling not included)
-- Logging & debug files via `--mode debug`
-- Browse depth defaults to 3 — raise it if you hate yourself
+- Logging & debug files can be tuned from `src/opcua_client/.env` or via `--mode debug`
+- Browse, collect, certificate, and profile directory defaults now come from `src/opcua_client/.env`
+
+### Centralized Defaults via `.env`
+
+The file `src/opcua_client/.env` is the single place to orchestrate package defaults such as:
+
+- runtime mode and log level
+- socket/session/request timeouts
+- browse depth and namespace filters
+- CSV output path and collector reconnect timings
+- profile search directories
+- client certificate storage paths and certificate subject defaults
+
+Example knobs you can edit there:
+
+```dotenv
+OPCUA_MODE=prod
+OPCUA_LOG_LEVEL=INFO
+OPCUA_TIMEOUT=30.0
+OPCUA_MAX_DEPTH=10
+OPCUA_CSV_FILE=alarms.csv
+OPCUA_PROFILE_DIR=connections
+OPCUA_CERT_BASE_DIR=certs
+```
+
+If you provide explicit certificate paths through a profile or runtime config, those paths are now honored for secure connections instead of being replaced by auto-generated defaults.
 
 ## Running Tests
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +14,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
+from .env_defaults import get_formatted_str, get_path, get_str
 
 _logger = logging.getLogger("certs")
 
@@ -33,7 +33,7 @@ def _config_base_dir() -> Path:
     Return the base directory for config-scoped certificates, under
     ~/.config/opcua-client/certs.
     """
-    return Path("~/.config/opcua-client/certs").expanduser()
+    return get_path("OPCUA_FALLBACK_CERT_BASE_DIR", "~/.config/opcua-client/certs")
 
 
 def _ensure_base_dirs(base_dir: Path) -> ClientCertPaths:
@@ -46,8 +46,8 @@ def _ensure_base_dirs(base_dir: Path) -> ClientCertPaths:
     cert_dir.mkdir(parents=True, exist_ok=True)
     private_dir.mkdir(parents=True, exist_ok=True)
 
-    cert_file = cert_dir / "myclient-selfsigned.der"
-    key_file = private_dir / "myclient.pem"
+    cert_file = cert_dir / get_str("OPCUA_CLIENT_CERT_FILENAME", "myclient-selfsigned.der")
+    key_file = private_dir / get_str("OPCUA_CLIENT_KEY_FILENAME", "myclient.pem")
 
     return ClientCertPaths(
         base_dir=base_dir,
@@ -67,8 +67,7 @@ def get_default_client_cert_paths() -> ClientCertPaths:
     2. If that fails for any reason (e.g., permissions), fall back to
        ~/.config/opcua-client/certs.
     """
-    cwd = Path(os.getcwd())
-    cwd_base = cwd / "certs"
+    cwd_base = get_path("OPCUA_CERT_BASE_DIR", "certs", relative_to_cwd=True)
 
     try:
         return _ensure_base_dirs(cwd_base)
@@ -87,14 +86,16 @@ def _generate_self_signed_client_certificate(paths: ClientCertPaths) -> None:
     hostname = socket.gethostname()
 
     names: dict[str, str] = {
-        "countryName": "BE",
-        "stateOrProvinceName": "Gent",
-        "localityName": "GB",
-        "organizationName": "VCG",
+        "countryName": get_str("OPCUA_CERT_COUNTRY", "BE"),
+        "stateOrProvinceName": get_str("OPCUA_CERT_STATE", "Gent"),
+        "localityName": get_str("OPCUA_CERT_LOCALITY", "GB"),
+        "organizationName": get_str("OPCUA_CERT_ORG", "VCG"),
     }
 
     subject_alt_names: list[x509.GeneralName] = [
-        x509.UniformResourceIdentifier(f"urn:{hostname}:foobar:myclient"),
+        x509.UniformResourceIdentifier(
+            get_formatted_str("OPCUA_CLIENT_APP_URI_TEMPLATE", "urn:{hostname}:foobar:myclient", hostname=hostname)
+        ),
         x509.DNSName(hostname),
     ]
 
@@ -158,4 +159,3 @@ def ensure_client_certificates() -> tuple[str, str]:
             ) from exc
 
     return str(paths.cert_file), str(paths.key_file)
-

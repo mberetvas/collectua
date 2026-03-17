@@ -134,6 +134,20 @@ Footer {
     margin-bottom: 0;
 }
 
+#node-info-details {
+    height: 1fr;
+}
+
+#node-info-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+#copy-node-id-btn {
+    width: auto;
+    min-width: 20;
+}
+
 /* Tab bar theming */
 #tabbed-panel Tabs {
     background: #081108;

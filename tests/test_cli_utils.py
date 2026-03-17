@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import builtins
 import hashlib
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -285,3 +286,61 @@ def test_ensure_server_trust_user_accepts_and_persists(tmp_path: Path, monkeypat
     # Cert file should have been written.
     assert persisted["path"].is_file()
 
+
+def test_connect_smoke_uses_explicit_cert_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, object] = {}
+
+    class DummyRoot:
+        async def get_children(self) -> list[object]:
+            return []
+
+    class DummyClient:
+        def __init__(self, *, url: str, timeout: float) -> None:
+            created["url"] = url
+            created["timeout"] = timeout
+            self.application_uri = ""
+            self.session_timeout = 0
+            self.uaclient = SimpleNamespace(request_timeout=0)
+            self.nodes = SimpleNamespace(root=DummyRoot())
+            self.security_string = ""
+
+        def set_user(self, username: str) -> None:
+            created["username"] = username
+
+        def set_password(self, password: str) -> None:
+            created["password"] = password
+
+        async def set_security_string(self, value: str) -> None:
+            self.security_string = value
+            created["security_string"] = value
+
+        async def connect(self) -> None:
+            return None
+
+        async def disconnect(self) -> None:
+            return None
+
+    def fail_if_called() -> tuple[str, str]:
+        raise AssertionError("ensure_client_certificates should not be called when explicit cert paths are set")
+
+    monkeypatch.setattr(cli, "Client", DummyClient)
+    monkeypatch.setattr(cli, "ensure_client_certificates", fail_if_called)
+
+    runtime = RuntimeConfig(
+        command="connect",
+        log_level="INFO",
+        connection=ConnectionConfig(
+            url="opc.tcp://server:4840",
+            timeout=5.0,
+            auth_policy="Basic256Sha256",
+            security_mode="Sign",
+            cert_file="/tmp/from-config.der",
+            key_file="/tmp/from-config.pem",
+        ),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+
+    asyncio.run(cli._connect_smoke(runtime))
+
+    assert created["security_string"] == "Basic256Sha256,Sign,/tmp/from-config.der,/tmp/from-config.pem"
