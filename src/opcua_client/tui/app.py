@@ -21,11 +21,13 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane
 
+from opcua_client.domain.alarm import Alarm
 from opcua_client.runtime_config import RuntimeConfig
 from opcua_client.cert_paths import ensure_client_certificates
 from opcua_client.condition_refresh import condition_refresh_with_retry
-from opcua_client.collector import CSV_HEADERS, ActiveAlarm, subscribe as collector_subscribe
+from opcua_client.collector import CSV_HEADERS, subscribe as collector_subscribe
 from opcua_client.env_defaults import get_formatted_str
+from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
@@ -127,9 +129,24 @@ class StartupSplashScreen(ModalScreen[None]):
 
 
 class AlarmRow(Message):
-    def __init__(self, row: dict[str, str]) -> None:
+    def __init__(self, alarm: Alarm) -> None:
         super().__init__()
-        self.row = row
+        self.alarm = alarm
+        # Compatibility for existing tests/widgets expecting a row dict.
+        self.row = {
+            "timestamp_utc": alarm.timestamp_utc.isoformat(),
+            "event_type": alarm.event_type,
+            "source_name": alarm.source_name,
+            "message": alarm.message,
+            "severity": alarm.severity.value,
+            "condition_name": alarm.condition_name,
+            "event_id": alarm.event_id,
+            "condition_id": str(alarm.alarm_id),
+            "retain": "" if alarm.retain is None else str(bool(alarm.retain)),
+            "active_state": "" if alarm.active_state is None else str(bool(alarm.active_state)),
+            "acked_state": "" if alarm.acked_state is None else str(bool(alarm.acked_state)),
+            "raw": alarm.raw,
+        }
 
 
 class ConnectionState(Message):
@@ -157,7 +174,7 @@ class TuiAlarmHandler:
         self.csv_path = csv_path
         self.app = app
         self._ensure_csv_header()
-        self._active_alarms: Dict[str, ActiveAlarm] = {}
+        self._active_alarms: Dict[str, Alarm] = {}
 
     def _ensure_csv_header(self) -> None:
         if not os.path.exists(self.csv_path):
@@ -204,16 +221,18 @@ class TuiAlarmHandler:
         else:
             retain_normalized = bool(retain) if retain is not None else None
 
-        active_alarm = ActiveAlarm(
-            condition_id=condition_id,
+        alarm = Alarm.from_values(
+            alarm_id=str(condition_id),
             condition_name=str(row.get("condition_name", "")),
             source_name=str(row.get("source_name", "")),
             message=str(row.get("message", "")),
-            severity=str(row.get("severity", "")),
+            severity=row.get("severity"),
             timestamp_utc=str(row.get("timestamp_utc", "")),
             retain=retain_normalized,
             active_state=bool(active_state) if active_state is not None else None,
             acked_state=bool(acked_state) if acked_state is not None else None,
+            event_type=str(row.get("event_type", "")),
+            event_id=str(row.get("event_id", "")),
             raw=str(row.get("raw", "")),
         )
 
@@ -224,28 +243,29 @@ class TuiAlarmHandler:
             return
 
         _logger.debug("Upserting active alarm for ConditionId=%s", condition_id)
-        self._active_alarms[condition_id] = active_alarm
+        self._active_alarms[condition_id] = alarm
 
-    def get_active_alarms(self) -> Mapping[str, ActiveAlarm]:
+    def get_active_alarms(self) -> Mapping[str, Alarm]:
         """Return a read-only view of the currently active alarms."""
         return dict(self._active_alarms)
 
     def event_notification(self, event) -> None:
         try:
             _logger.debug("RAW EVENT RECEIVED: %s", event)
+            alarm = event_to_alarm(event)
             row = {
-                "timestamp_utc": str(getattr(event, "Time", datetime.now(timezone.utc))),
-                "event_type": str(getattr(event, "EventType", "")),
-                "source_name": str(getattr(event, "SourceName", "")),
-                "message": str(getattr(event, "Message", "")),
-                "severity": str(getattr(event, "Severity", "")),
-                "condition_name": str(getattr(event, "ConditionName", "")),
-                "event_id": str(getattr(event, "EventId", "")),
-                "condition_id": self._condition_id_from_event(event),
-                "retain": getattr(event, "Retain", None),
-                "active_state": self._bool_from_state(getattr(event, "ActiveState", None)),
-                "acked_state": self._bool_from_state(getattr(event, "AckedState", None)),
-                "raw": str(event),
+                "timestamp_utc": alarm.timestamp_utc.isoformat(),
+                "event_type": alarm.event_type,
+                "source_name": alarm.source_name,
+                "message": alarm.message,
+                "severity": alarm.severity.value,
+                "condition_name": alarm.condition_name,
+                "event_id": alarm.event_id,
+                "condition_id": str(alarm.alarm_id),
+                "retain": alarm.retain,
+                "active_state": alarm.active_state,
+                "acked_state": alarm.acked_state,
+                "raw": alarm.raw,
             }
 
             self._update_active_alarms(row)
@@ -254,7 +274,7 @@ class TuiAlarmHandler:
                 writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
                 writer.writerow(row)
 
-            self.app.post_message(AlarmRow(row))
+            self.app.post_message(AlarmRow(alarm))
 
         except Exception:
             _logger.exception("Failed to process event")
@@ -693,7 +713,7 @@ class OpcuaTuiApp(App[None]):
             await asyncio.sleep(1)
 
     def on_alarm_row(self, message: AlarmRow) -> None:
-        self.query_one(AlarmTableWidget).add_event(message.row)
+        self.query_one(AlarmTableWidget).add_event(message.alarm)
 
     def on_connection_state(self, message: ConnectionState) -> None:
         status = self.query_one(ConnectionStatusWidget)

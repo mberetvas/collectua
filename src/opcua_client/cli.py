@@ -13,6 +13,7 @@ from asyncua import Client, ua
 from . import browse, collector
 from .cert_paths import ensure_client_certificates
 from .env_defaults import get_bool, get_formatted_str, get_int_list, get_str
+from .infrastructure.config_loader import load_connection_from_cli_args
 from .profile_autosetup import ensure_profile_for_url_interactive
 from .profile_loader import list_profiles, load_profile, resolve_profile_path
 from .runtime_config import RuntimeConfig
@@ -563,6 +564,25 @@ def main(argv=None) -> int:
                 if not hasattr(args, key):
                     setattr(args, key, value)
 
+        # Resolve + validate connection config via infrastructure loader
+        try:
+            resolved_connection = load_connection_from_cli_args(args)
+        except Exception as exc:
+            print(f"[config error] {exc}")
+            return 2
+        args.url = resolved_connection.url
+        args.timeout = resolved_connection.timeout
+        args.session_timeout = resolved_connection.session_timeout
+        args.request_timeout = resolved_connection.request_timeout
+        args.security_mode = resolved_connection.security_mode.value
+        args.auth_policy = resolved_connection.auth_policy.value
+        args.username = resolved_connection.credentials.username
+        args.password = resolved_connection.credentials.password
+        args.cert_file = resolved_connection.cert_file
+        args.key_file = resolved_connection.key_file
+        args.server_cert = resolved_connection.server_cert
+        args.trust_cert = resolved_connection.trust_cert
+
         # Build and validate config
         config = RuntimeConfig.from_namespace(args)
         errors = config.validate()
@@ -615,6 +635,25 @@ def main(argv=None) -> int:
         for key, value in profile_values.items():
             if not hasattr(args, key):
                 setattr(args, key, value)
+
+    # Resolve + validate connection config via infrastructure loader
+    try:
+        resolved_connection = load_connection_from_cli_args(args)
+    except Exception as exc:
+        print(f"[config error] {exc}")
+        return 2
+    args.url = resolved_connection.url
+    args.timeout = resolved_connection.timeout
+    args.session_timeout = resolved_connection.session_timeout
+    args.request_timeout = resolved_connection.request_timeout
+    args.security_mode = resolved_connection.security_mode.value
+    args.auth_policy = resolved_connection.auth_policy.value
+    args.username = resolved_connection.credentials.username
+    args.password = resolved_connection.credentials.password
+    args.cert_file = resolved_connection.cert_file
+    args.key_file = resolved_connection.key_file
+    args.server_cert = resolved_connection.server_cert
+    args.trust_cert = resolved_connection.trust_cert
 
     config = RuntimeConfig.from_namespace(args)
     errors = config.validate()

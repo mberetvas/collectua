@@ -24,9 +24,8 @@ view-server-logs:
 stop-server:
     @echo "Stopping OPC UA server..."
     docker stop opcplc
-
-run-tui url='':
-    @uv run collectua --tui {{ if url == "" { "" } else { "--url " + url } }}
+run-tui args='':
+    @uv run collectua {{ args }}
 
 test:
     uv run pytest

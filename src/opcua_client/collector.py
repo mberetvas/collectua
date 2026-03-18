@@ -9,17 +9,18 @@ Long-running script that:
 """
 
 import asyncio
-import csv
 import logging
-import os
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Mapping, Optional, Protocol
+from typing import Any, Callable, Mapping, Optional, Protocol
 
 from asyncua import Client, ua
 
 from opcua_client.condition_refresh import condition_refresh_with_retry
+from opcua_client.domain.alarm import Alarm
 from opcua_client.env_defaults import get_float, get_int, get_str
+from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
+from opcua_client.infrastructure.csv_writer import CSVAlarmWriter
+from opcua_client.infrastructure.repositories import InMemoryAlarmRepository
 
 # ──────────────────────── CONFIG ────────────────────────
 CSV_FILE = get_str("OPCUA_CSV_FILE", "alarms.csv")
@@ -58,22 +59,6 @@ class AlarmEventHandler(Protocol):
     def status_change_notification(self, status) -> None: ...
 
 
-@dataclass(frozen=True)
-class ActiveAlarm:
-    """In-memory snapshot of an active alarm/condition keyed by ConditionId."""
-
-    condition_id: str
-    condition_name: str
-    source_name: str
-    message: str
-    severity: str
-    timestamp_utc: str
-    retain: Optional[bool]
-    active_state: Optional[bool]
-    acked_state: Optional[bool]
-    raw: str
-
-
 class AlarmHandler:
     """
     Event handler for OPC UA subscriptions.
@@ -82,33 +67,30 @@ class AlarmHandler:
 
     def __init__(self, csv_path: str):
         self.csv_path = csv_path
-        self._ensure_csv_header()
-        self._active_alarms: Dict[str, ActiveAlarm] = {}
-
-    def _ensure_csv_header(self):
-        if not os.path.exists(self.csv_path):
-            with open(self.csv_path, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(CSV_HEADERS)
+        self._writer = CSVAlarmWriter(csv_path)
+        self._alarms = InMemoryAlarmRepository()
+        self._alarm_index: dict[str, Alarm] = {}
 
     @staticmethod
     def _condition_id_from_event(event) -> Optional[str]:
+        """Compatibility helper (used by tests)."""
+
         value = getattr(event, "ConditionId", None)
         if value is None:
             return None
-        # asyncua typically exposes a NodeId or Variant-like object; fall back to str().
         if isinstance(value, ua.NodeId):
             return value.to_string()
         to_string = getattr(value, "to_string", None)
         if callable(to_string):
-            return to_string()
+            return str(to_string())
         return str(value)
 
     @staticmethod
     def _bool_from_state(state) -> Optional[bool]:
+        """Compatibility helper (used by tests)."""
+
         if state is None:
             return None
-        # Common A&C pattern: state.Id is a Variant/boolean; otherwise interpret directly.
         try:
             inner = getattr(state, "Id", state)
         except Exception:
@@ -118,66 +100,60 @@ class AlarmHandler:
         except Exception:
             return None
 
-    def _update_active_alarms(self, row: Mapping[str, Any], event) -> None:
-        condition_id = row.get("condition_id")
-        if not condition_id:
-            return
+    def _update_active_alarms(self, row_or_alarm: Mapping[str, Any] | Alarm, event: Any = None) -> None:
+        """Compatibility: accepts either a row mapping (legacy) or a domain Alarm."""
 
-        retain = row.get("retain")
-        active_state = row.get("active_state")
-        acked_state = row.get("acked_state")
-
-        if isinstance(retain, str):
-            retain_normalized: Optional[bool] = retain.lower() == "true"
+        _ = event
+        if isinstance(row_or_alarm, Alarm):
+            alarm = row_or_alarm
         else:
-            retain_normalized = bool(retain) if retain is not None else None
+            condition_id = row_or_alarm.get("condition_id")
+            if not condition_id:
+                return
+            alarm = Alarm.from_values(
+                alarm_id=str(condition_id),
+                condition_name=str(row_or_alarm.get("condition_name", "")),
+                source_name=str(row_or_alarm.get("source_name", "")),
+                message=str(row_or_alarm.get("message", "")),
+                severity=row_or_alarm.get("severity"),
+                timestamp_utc=row_or_alarm.get("timestamp_utc"),
+                retain=_normalize_optional_bool(row_or_alarm.get("retain")),
+                active_state=_normalize_optional_bool(row_or_alarm.get("active_state")),
+                acked_state=_normalize_optional_bool(row_or_alarm.get("acked_state")),
+                event_type=str(row_or_alarm.get("event_type", "")),
+                event_id=str(row_or_alarm.get("event_id", "")),
+                raw=str(row_or_alarm.get("raw", "")),
+            )
 
-        active_alarm = ActiveAlarm(
-            condition_id=condition_id,
-            condition_name=str(row.get("condition_name", "")),
-            source_name=str(row.get("source_name", "")),
-            message=str(row.get("message", "")),
-            severity=str(row.get("severity", "")),
-            timestamp_utc=str(row.get("timestamp_utc", "")),
-            retain=retain_normalized,
-            active_state=bool(active_state) if active_state is not None else None,
-            acked_state=bool(acked_state) if acked_state is not None else None,
-            raw=str(row.get("raw", "")),
-        )
+        _logger.debug("Upserting alarm for ConditionId=%s", alarm.alarm_id)
+        self._alarms.add(alarm)
+        self._alarm_index[str(alarm.alarm_id)] = alarm
 
-        if retain_normalized is False:
-            if condition_id in self._active_alarms:
-                _logger.debug("Clearing active alarm for ConditionId=%s", condition_id)
-                self._active_alarms.pop(condition_id, None)
-            return
-
-        _logger.debug("Upserting active alarm for ConditionId=%s", condition_id)
-        self._active_alarms[condition_id] = active_alarm
-
-    def get_active_alarms(self) -> Mapping[str, ActiveAlarm]:
+    def get_active_alarms(self) -> Mapping[str, Alarm]:
         """Return a read-only view of the currently active alarms."""
-        return dict(self._active_alarms)
+        return {alarm_id: alarm for alarm_id, alarm in self._alarm_index.items() if alarm.retain is not False}
 
     def event_notification(self, event):
         """Called automatically by asyncua on each event."""
         try:
             _logger.debug("RAW EVENT RECEIVED: %s", event)
+            alarm = event_to_alarm(event)
             row = {
-                "timestamp_utc": str(getattr(event, "Time", datetime.now(timezone.utc))),
-                "event_type": str(getattr(event, "EventType", "")),
-                "source_name": str(getattr(event, "SourceName", "")),
-                "message": str(getattr(event, "Message", "")),
-                "severity": str(getattr(event, "Severity", "")),
-                "condition_name": str(getattr(event, "ConditionName", "")),
-                "event_id": str(getattr(event, "EventId", "")),
-                "condition_id": self._condition_id_from_event(event),
-                "retain": getattr(event, "Retain", None),
-                "active_state": self._bool_from_state(getattr(event, "ActiveState", None)),
-                "acked_state": self._bool_from_state(getattr(event, "AckedState", None)),
-                "raw": str(event),
+                "timestamp_utc": alarm.timestamp_utc.isoformat(),
+                "event_type": alarm.event_type,
+                "source_name": alarm.source_name,
+                "message": alarm.message,
+                "severity": alarm.severity.value,
+                "condition_name": alarm.condition_name,
+                "event_id": alarm.event_id,
+                "condition_id": str(alarm.alarm_id),
+                "retain": alarm.retain,
+                "active_state": alarm.active_state,
+                "acked_state": alarm.acked_state,
+                "raw": alarm.raw,
             }
 
-            self._update_active_alarms(row, event)
+            self._update_active_alarms(alarm)
 
             _logger.info(
                 "[%s]  SEV=%s  SRC=%s  MSG=%s",
@@ -187,15 +163,31 @@ class AlarmHandler:
                 row["message"],
             )
 
-            with open(self.csv_path, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
-                writer.writerow(row)
+            self._writer.write_alarm(alarm)
 
         except Exception:
             _logger.exception("Failed to process event")
 
     def status_change_notification(self, status):
         _logger.warning("Subscription status changed: %s", status)
+
+
+def _normalize_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        return None
+    try:
+        return bool(value)
+    except Exception:
+        return None
 
 
 async def connect(endpoint: str, timeout: float = TIMEOUT) -> Client:
