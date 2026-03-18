@@ -131,6 +131,7 @@ def test_update_active_alarms_lifecycle(tmp_path: Path) -> None:
 def test_event_notification_writes_csv_and_updates_alarms(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     csv_path = tmp_path / "alarms.csv"
     handler = collector.AlarmHandler(str(csv_path))
+    caplog.set_level("INFO")
 
     event = _DummyEvent(
         condition_id=_DummyNodeId("ns=1;i=42"),
@@ -163,19 +164,29 @@ class _FakeSubscription:
         self.evtypes = evtypes
         self.where_clause_generation = where_clause_generation
 
+    async def subscribe_data_change(self, node) -> None:  # pragma: no cover
+        self.datachange_node = node
+
+
+class _FakeNode:
+    def __init__(self, nodeid: Any) -> None:
+        self.nodeid = nodeid
+
 
 class _FakeClient:
     def __init__(self) -> None:
         self.created_with: dict[str, Any] = {}
-        self.node = object()
+        self.node = None
 
     async def create_subscription(self, period: int, handler: Any) -> _FakeSubscription:
         self.created_with = {"period": period, "handler": handler}
         return _FakeSubscription()
 
     def get_node(self, nodeid: Any) -> Any:
-        self.node = object()
-        return self.node
+        node = _FakeNode(nodeid)
+        if nodeid == collector.ua.ObjectIds.Server:
+            self.node = node
+        return node
 
 
 def test_subscribe_creates_subscription_and_runs_condition_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -238,4 +249,67 @@ def test_subscribe_skips_condition_refresh_when_not_active(monkeypatch: pytest.M
     asyncio.run(asyncio.sleep(0.1))
 
     assert called["refresh"] is False
+
+
+def test_acknowledge_alarm_calls_condition_method() -> None:
+    calls: dict[str, Any] = {}
+
+    class _ConditionNode:
+        async def call_method(self, method_id, *args) -> None:
+            calls["method_id"] = method_id
+            calls["args"] = args
+
+    class _Client:
+        def get_node(self, nodeid: str) -> _ConditionNode:
+            calls["condition_id"] = nodeid
+            return _ConditionNode()
+
+    asyncio.run(
+        collector.acknowledge_alarm(
+            _Client(),
+            condition_id="ns=2;s=alarm-1",
+            event_id=b"\x01\x02",
+            comment="operator ack",
+        )
+    )
+
+    assert calls["condition_id"] == "ns=2;s=alarm-1"
+    assert calls["method_id"] == collector.ua.ObjectIds.AcknowledgeableConditionType_Acknowledge
+    assert calls["args"][0].Value == b"\x01\x02"
+    assert calls["args"][1].Text == "operator ack"
+
+
+def test_subscribe_triggers_condition_refresh_on_overload_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_client = _FakeClient()
+    refresh_calls: list[int] = []
+
+    async def fake_condition_refresh(*, server_node, subscription_id: int, logger, is_active=None) -> None:
+        refresh_calls.append(subscription_id)
+
+    monkeypatch.setattr(collector, "condition_refresh_with_retry", fake_condition_refresh)
+
+    async def _exercise() -> _FakeSubscription:
+        handler = collector.AlarmHandler(str(tmp_path / "alarms.csv"))
+        sub = await collector.subscribe(
+            client=fake_client,
+            handler=handler,
+            publish_interval_ms=123,
+            enable_condition_refresh=False,
+            is_active=None,
+            overloads_node_id="ns=3;s=Overloads",
+        )
+        overload_node = sub.datachange_node
+        handler.datachange_notification(overload_node, True, None)
+        handler.datachange_notification(overload_node, False, None)
+        handler.datachange_notification(overload_node, False, None)
+        await asyncio.sleep(0)
+        return sub
+
+    sub = asyncio.run(_exercise())
+
+    assert isinstance(sub, _FakeSubscription)
+    assert getattr(sub, "datachange_node").nodeid == "ns=3;s=Overloads"
+    assert refresh_calls == [sub.subscription_id]
 

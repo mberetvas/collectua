@@ -109,6 +109,20 @@ def get_float(name: str, default: float) -> float:
         return default
 
 
+def get_str_list(name: str, default: list[str] | None = None) -> list[str]:
+    """Return a comma-separated string list from the process environment or package defaults."""
+    raw = get_str(name, "")
+    if raw == "":
+        return list(default or [])
+
+    values: list[str] = []
+    for item in raw.split(","):
+        token = item.strip()
+        if token:
+            values.append(token)
+    return values
+
+
 def get_int_list(name: str, default: list[int] | None = None) -> list[int]:
     """Return a comma-separated integer list from the process environment or package defaults."""
     raw = get_str(name, "")

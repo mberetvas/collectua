@@ -11,7 +11,7 @@ Long-running script that:
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable, Mapping, Optional, Protocol
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol, Sequence
 
 from asyncua import Client, ua
 
@@ -45,6 +45,7 @@ CSV_HEADERS = [
 ]
 
 _logger = logging.getLogger("collector")
+DEFAULT_ACK_COMMENT = "acknowledged"
 
 
 class AlarmEventHandler(Protocol):
@@ -56,7 +57,43 @@ class AlarmEventHandler(Protocol):
 
     def event_notification(self, event) -> None: ...
 
+    def datachange_notification(self, node, val, data) -> None: ...
+
     def status_change_notification(self, status) -> None: ...
+
+
+class OverloadRecoveryMonitor:
+    def __init__(self, logger: logging.Logger) -> None:
+        self._logger = logger
+        self._node_id: str | None = None
+        self._last_state: bool | None = None
+        self._refresh_callback: Callable[[], Awaitable[None]] | None = None
+
+    def configure(
+        self,
+        *,
+        node_id: str,
+        refresh_callback: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._node_id = node_id
+        self._refresh_callback = refresh_callback
+        self._last_state = None
+
+    def handle_datachange(self, node: Any, value: Any) -> None:
+        if not self._node_id:
+            return
+        if _node_id_to_string(node) != self._node_id:
+            return
+
+        state = _normalize_optional_bool(value)
+        if state is None:
+            return
+
+        previous = self._last_state
+        self._last_state = state
+        if previous is True and state is False and self._refresh_callback is not None:
+            self._logger.info("Overload recovered on %s; scheduling ConditionRefresh", self._node_id)
+            asyncio.create_task(self._refresh_callback())
 
 
 class AlarmHandler:
@@ -70,6 +107,7 @@ class AlarmHandler:
         self._writer = CSVAlarmWriter(csv_path)
         self._alarms = InMemoryAlarmRepository()
         self._alarm_index: dict[str, Alarm] = {}
+        self._overload_monitor = OverloadRecoveryMonitor(_logger)
 
     @staticmethod
     def _condition_id_from_event(event) -> Optional[str]:
@@ -122,6 +160,7 @@ class AlarmHandler:
                 acked_state=_normalize_optional_bool(row_or_alarm.get("acked_state")),
                 event_type=str(row_or_alarm.get("event_type", "")),
                 event_id=str(row_or_alarm.get("event_id", "")),
+                event_id_bytes=row_or_alarm.get("event_id_bytes"),
                 raw=str(row_or_alarm.get("raw", "")),
             )
 
@@ -171,6 +210,18 @@ class AlarmHandler:
     def status_change_notification(self, status):
         _logger.warning("Subscription status changed: %s", status)
 
+    def configure_overloads_monitor(
+        self,
+        *,
+        node_id: str,
+        refresh_callback: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._overload_monitor.configure(node_id=node_id, refresh_callback=refresh_callback)
+
+    def datachange_notification(self, node, val, data) -> None:
+        _ = data
+        self._overload_monitor.handle_datachange(node, val)
+
 
 def _normalize_optional_bool(value: Any) -> bool | None:
     if value is None:
@@ -190,7 +241,22 @@ def _normalize_optional_bool(value: Any) -> bool | None:
         return None
 
 
-async def connect(endpoint: str, timeout: float = TIMEOUT) -> Client:
+def apply_session_locales(client: Client, locales: Sequence[str] | None) -> None:
+    if not locales:
+        return
+    normalized = [locale.strip() for locale in locales if str(locale).strip()]
+    if not normalized:
+        return
+    setattr(client, "session_locale_ids", list(normalized))
+    setattr(client, "_locale", list(normalized))
+
+
+async def connect(
+    endpoint: str,
+    timeout: float = TIMEOUT,
+    *,
+    locales: Sequence[str] | None = None,
+) -> Client:
     """Create and connect an OPC UA client (no security).
 
     This helper is primarily used by the CLI collector loop. The TUI uses its
@@ -198,6 +264,7 @@ async def connect(endpoint: str, timeout: float = TIMEOUT) -> Client:
     subscription helpers below.
     """
     client = Client(url=endpoint, timeout=timeout)
+    apply_session_locales(client, locales)
     await client.connect()
     _logger.info("Connected to %s", endpoint)
     return client
@@ -210,6 +277,7 @@ async def subscribe(
     *,
     enable_condition_refresh: bool = True,
     is_active: Optional[Callable[[], bool]] = None,
+    overloads_node_id: str | None = None,
 ):
     """
     Subscribe to all alarm events from the Server node.
@@ -233,6 +301,30 @@ async def subscribe(
         where_clause_generation=False,
     )
     _logger.info("Subscribed to BaseEventType and ConditionType alarms & events")
+
+    async def _refresh_on_recovery() -> None:
+        if is_active is not None and not is_active():
+            _logger.info(
+                "Skipping overload recovery refresh for SubscriptionId=%s: collector no longer active",
+                subscription.subscription_id,
+            )
+            return
+        await condition_refresh_with_retry(
+            server_node=server_node,
+            subscription_id=subscription.subscription_id,
+            logger=_logger,
+            is_active=is_active,
+        )
+
+    if overloads_node_id:
+        overload_node = client.get_node(overloads_node_id)
+        if hasattr(handler, "configure_overloads_monitor"):
+            handler.configure_overloads_monitor(
+                node_id=overloads_node_id,
+                refresh_callback=_refresh_on_recovery,
+            )
+        await subscription.subscribe_data_change(overload_node)
+        _logger.info("Subscribed to overload monitor node %s", overloads_node_id)
 
     if enable_condition_refresh:
 
@@ -263,12 +355,35 @@ async def subscribe(
     return subscription
 
 
+async def acknowledge_alarm(
+    client: Client,
+    condition_id: str,
+    event_id: bytes | bytearray | memoryview,
+    comment: str | None = None,
+) -> None:
+    payload = bytes(event_id)
+    if not condition_id.strip():
+        raise ValueError("condition_id is required")
+    if not payload:
+        raise ValueError("event_id is required")
+
+    condition_node = client.get_node(condition_id)
+    await condition_node.call_method(
+        ua.ObjectIds.AcknowledgeableConditionType_Acknowledge,
+        ua.Variant(payload, ua.VariantType.ByteString),
+        ua.LocalizedText(comment or DEFAULT_ACK_COMMENT),
+    )
+
+
 async def run(
     endpoint: str,
     csv_file: str = CSV_FILE,
     publish_interval_ms: int = PUBLISH_INTERVAL_MS,
     reconnect_delay_sec: int = RECONNECT_DELAY_SEC,
     timeout: float = TIMEOUT,
+    *,
+    locales: Sequence[str] | None = None,
+    overloads_node_id: str | None = None,
 ):
     """Main loop with auto-reconnect. Core callable for the CLI.
 
@@ -281,13 +396,14 @@ async def run(
         subscription = None
 
         try:
-            client = await connect(endpoint, timeout=timeout)
+            client = await connect(endpoint, timeout=timeout, locales=locales)
             subscription = await subscribe(
                 client,
                 handler,
                 publish_interval_ms=publish_interval_ms,
                 enable_condition_refresh=True,
                 is_active=None,
+                overloads_node_id=overloads_node_id,
             )
 
             _logger.info("Listening for alarms... (Ctrl+C to stop)")
@@ -331,4 +447,14 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def _node_id_to_string(node: Any) -> str:
+    raw = getattr(node, "nodeid", node)
+    if isinstance(raw, ua.NodeId):
+        return raw.to_string()
+    to_string = getattr(raw, "to_string", None)
+    if callable(to_string):
+        return str(to_string())
+    return str(raw)
 

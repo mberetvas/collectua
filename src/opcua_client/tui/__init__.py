@@ -62,6 +62,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
     )
+    parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
+    parser.add_argument(
+        "--overloads-node-id",
+        default=argparse.SUPPRESS,
+        help="Optional NodeId for the Siemens Overloads state monitor",
+    )
 
     parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     parser.add_argument(

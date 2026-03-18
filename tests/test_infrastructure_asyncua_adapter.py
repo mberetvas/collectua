@@ -49,6 +49,56 @@ def test_event_to_alarm_maps_fields() -> None:
     assert alarm.is_retained() is True
 
 
+def test_event_to_alarm_formats_program_alarm_placeholders() -> None:
+    @dataclass
+    class _ProgramAlarmEvent:
+        ConditionId: str = "ns=2;s=alarm-2"
+        ConditionName: str = "ProgramAlarm"
+        SourceName: str = "PLC1"
+        Message: str = "Error @1%d@ on @2%s@"
+        Arguments: list[object] = None  # type: ignore[assignment]
+        Severity: int = 500
+        Time: str = "2024-01-01T00:00:00Z"
+        EventType: str = "Program_Alarm"
+        EventId: bytes = b"\x01\x02"
+        Retain: bool = True
+        ActiveState: bool = True
+        AckedState: bool = False
+
+        def __post_init__(self) -> None:
+            self.Arguments = [404, "PumpA"]
+
+    alarm = event_to_alarm(_ProgramAlarmEvent())
+
+    assert alarm.message == "Error 404 on PumpA"
+    assert alarm.event_id == "0102"
+    assert alarm.event_id_bytes == b"\x01\x02"
+
+
+def test_event_to_alarm_marks_unresolved_program_alarm_placeholders() -> None:
+    @dataclass
+    class _ProgramAlarmEvent:
+        ConditionId: str = "ns=2;s=alarm-3"
+        ConditionName: str = "ProgramAlarm"
+        SourceName: str = "PLC1"
+        Message: str = "Error @1%d@ on @2%s@"
+        Arguments: list[object] = None  # type: ignore[assignment]
+        Severity: int = 500
+        Time: str = "2024-01-01T00:00:00Z"
+        EventType: str = "Program_Alarm"
+        EventId: str = "evt-2"
+        Retain: bool = True
+        ActiveState: bool = True
+        AckedState: bool = False
+
+        def __post_init__(self) -> None:
+            self.Arguments = [404]
+
+    alarm = event_to_alarm(_ProgramAlarmEvent())
+
+    assert alarm.message == "Error @1%d@ on @2%s@ [unresolved]"
+
+
 def test_node_to_domain_node_maps_node() -> None:
     node = node_to_domain_node(_DummyNode())
     assert str(node.node_id) == "ns=2;s=Tag1"
@@ -72,6 +122,8 @@ def test_create_connection_from_runtime_config() -> None:
             key_file="",
             server_cert="",
             trust_cert=False,
+            locales=["en-US"],
+            overloads_node_id="ns=3;s=Overloads",
             max_depth=3,
             target_namespace=[],
             csv_file="alarms.csv",

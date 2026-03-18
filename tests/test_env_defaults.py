@@ -26,6 +26,8 @@ def test_runtime_config_from_namespace_uses_env_defaults(tmp_path: Path, monkeyp
                 "OPCUA_CSV_FILE=env-alarms.csv",
                 "OPCUA_PUBLISH_INTERVAL_MS=750",
                 "OPCUA_RECONNECT_DELAY_SEC=11",
+                "OPCUA_LOCALES=en-US,de-DE",
+                "OPCUA_OVERLOADS_NODE_ID=ns=3;s=Overloads",
             ]
         ),
         encoding="utf-8",
@@ -48,6 +50,8 @@ def test_runtime_config_from_namespace_uses_env_defaults(tmp_path: Path, monkeyp
     assert config.collect.csv_file == "env-alarms.csv"
     assert config.collect.publish_interval_ms == 750
     assert config.collect.reconnect_delay_sec == 11
+    assert config.connection.locales == ["en-US", "de-DE"]
+    assert config.connection.overloads_node_id == "ns=3;s=Overloads"
 
     clear_env_defaults_cache()
 

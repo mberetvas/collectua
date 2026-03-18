@@ -27,7 +27,13 @@ from opcua_client.config.env_defaults import get_formatted_str
 from opcua_client.config.runtime_config import RuntimeConfig
 from opcua_client.infrastructure.asyncua_compat import patch_create_session_server_uri
 from opcua_client.ops.condition_refresh import condition_refresh_with_retry
-from opcua_client.ops.collector import CSV_HEADERS, subscribe as collector_subscribe
+from opcua_client.ops.collector import (
+    CSV_HEADERS,
+    OverloadRecoveryMonitor,
+    acknowledge_alarm,
+    apply_session_locales,
+    subscribe as collector_subscribe,
+)
 from opcua_client.security.cert_paths import ensure_client_certificates
 from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
 
@@ -57,6 +63,7 @@ class HelpScreen(ModalScreen[None]):
                     "s: Toggle node multi-selection",
                     "Esc: Clear node multi-selection",
                     "c: Copy selected Node IDs",
+                    "a: Acknowledge selected alarm",
                     "l: Copy all logs",
                     "e: Copy error logs",
                     "↑/↓: Previous/next sibling node (when Node Tree is focused)",
@@ -69,7 +76,7 @@ class HelpScreen(ModalScreen[None]):
                     "v: Toggle Logs tab",
                     "q: Quit",
                     "",
-                    "This dashboard is read-only and streams alarms/events in real-time.",
+                    "This dashboard streams alarms/events in real-time and supports alarm acknowledgment.",
                     "Press ESC or Enter to close.",
                 ]
             ),
@@ -180,6 +187,7 @@ class TuiAlarmHandler:
         self.app = app
         self._ensure_csv_header()
         self._active_alarms: Dict[str, Alarm] = {}
+        self._overload_monitor = OverloadRecoveryMonitor(_logger)
 
     def _ensure_csv_header(self) -> None:
         if not os.path.exists(self.csv_path):
@@ -238,6 +246,7 @@ class TuiAlarmHandler:
             acked_state=bool(acked_state) if acked_state is not None else None,
             event_type=str(row.get("event_type", "")),
             event_id=str(row.get("event_id", "")),
+            event_id_bytes=row.get("event_id_bytes"),
             raw=str(row.get("raw", "")),
         )
 
@@ -273,7 +282,7 @@ class TuiAlarmHandler:
                 "raw": alarm.raw,
             }
 
-            self._update_active_alarms(row)
+            self._update_active_alarms({**row, "event_id_bytes": alarm.event_id_bytes})
 
             with open(self.csv_path, "a", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
@@ -287,6 +296,13 @@ class TuiAlarmHandler:
     def status_change_notification(self, status) -> None:
         _logger.warning("Subscription status changed: %s", status)
 
+    def configure_overloads_monitor(self, *, node_id: str, refresh_callback) -> None:
+        self._overload_monitor.configure(node_id=node_id, refresh_callback=refresh_callback)
+
+    def datachange_notification(self, node, val, data) -> None:
+        _ = data
+        self._overload_monitor.handle_datachange(node, val)
+
 
 class OpcuaTuiApp(App[None]):
     CSS_PATH = "theme.tcss"
@@ -299,6 +315,7 @@ class OpcuaTuiApp(App[None]):
         Binding("s", "toggle_node_selection", "Toggle Node Selection"),
         Binding("escape", "clear_node_selection", "Clear Node Selection"),
         Binding("c", "copy_selected_node_id", "Copy Node IDs"),
+        Binding("a", "acknowledge_selected_alarm", "Ack Alarm"),
         Binding("l", "copy_logs", "Copy Logs"),
         Binding("e", "copy_errors", "Copy Errors"),
         Binding("?", "help", "Help"),
@@ -328,6 +345,7 @@ class OpcuaTuiApp(App[None]):
         self._search_query: str = ""
         self._search_results: list[Any] = []
         self._search_index: int = 0
+        self._alarm_tasks: set[asyncio.Task[Any]] = set()
 
     # #region agent log
     def _agent_log(self, *, runId: str, hypothesisId: str, location: str, message: str, data: dict) -> None:
@@ -534,6 +552,7 @@ class OpcuaTuiApp(App[None]):
         conn = self.config.connection
         auth_policy = AuthPolicy.from_value(conn.auth_policy)
         client = Client(url=conn.url, timeout=conn.timeout)
+        apply_session_locales(client, conn.locales)
         client.application_uri = get_formatted_str(
             "OPCUA_CLIENT_APP_URI_TEMPLATE",
             "urn:{hostname}:foobar:myclient",
@@ -620,6 +639,10 @@ class OpcuaTuiApp(App[None]):
             pass
         finally:
             self._client = None
+
+        for task in list(self._alarm_tasks):
+            task.cancel()
+        self._alarm_tasks.clear()
 
     async def _load_node_tree(self) -> None:
         if not self._client:
@@ -767,6 +790,7 @@ class OpcuaTuiApp(App[None]):
             # guard so we disable the built-in refresh in the shared helper.
             enable_condition_refresh=False,
             is_active=None,
+            overloads_node_id=self.config.connection.overloads_node_id or None,
         )
 
         subscription = self._subscription
@@ -853,10 +877,30 @@ class OpcuaTuiApp(App[None]):
                 return
 
             node = self._client.get_node(node_id)
-            value = await node.read_value()
+            data_value = await node.read_data_value()
+            status_code = getattr(data_value, "StatusCode", ua.StatusCode())
+            status_value = getattr(status_code, "value", 0)
+            status_name = getattr(status_code, "name", f"0x{status_value:08x}")
+            value = getattr(getattr(data_value, "Value", None), "Value", None)
 
             # Skip stale updates if user has selected a different node meanwhile.
             if not self._selected_node or self._selected_node.get("id") != node_id:
+                return
+
+            if status_value == ua.StatusCodes.GoodOverload:
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text=f"[bold {RETRO_AMBER}][PLC Busy: GoodOverload][/bold {RETRO_AMBER}]",
+                    value_status=f"{status_name} at {datetime.now().strftime('%H:%M:%S')}",
+                )
+                return
+
+            if hasattr(status_code, "is_good") and not status_code.is_good():
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text=f"[{RETRO_RED}]Read failed[/{RETRO_RED}]",
+                    value_status=status_name,
+                )
                 return
 
             value_rendered = str(value)
@@ -878,6 +922,44 @@ class OpcuaTuiApp(App[None]):
                     value_text=f"[{RETRO_RED}]Read failed[/{RETRO_RED}]",
                     value_status=str(exc),
                 )
+
+    def action_acknowledge_selected_alarm(self) -> None:
+        alarm_table = self.query_one(AlarmTableWidget)
+        if not alarm_table.has_focus:
+            return
+
+        alarm = alarm_table.get_selected_alarm()
+        if alarm is None:
+            self.notify("Select an alarm first.", timeout=2.0)
+            return
+        if self._client is None:
+            self.notify("Not connected to an OPC UA server.", timeout=2.0)
+            return
+        if not alarm.event_id_bytes:
+            self.notify("Selected alarm has no EventId to acknowledge.", timeout=2.5)
+            return
+
+        self.notify(f"Acknowledging {alarm.condition_name}...", timeout=1.5)
+        task = asyncio.create_task(self._acknowledge_alarm_task(alarm))
+        self._alarm_tasks.add(task)
+        task.add_done_callback(self._alarm_tasks.discard)
+
+    async def _acknowledge_alarm_task(self, alarm: Alarm) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            await acknowledge_alarm(
+                client,
+                condition_id=str(alarm.alarm_id),
+                event_id=alarm.event_id_bytes,
+            )
+        except Exception as exc:
+            _logger.exception("Failed to acknowledge alarm %s", alarm.alarm_id)
+            self.notify(f"Acknowledge failed: {exc}", timeout=3.0)
+            return
+
+        self.notify(f"Acknowledged {alarm.condition_name}.", timeout=2.0)
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

@@ -14,6 +14,7 @@ class AlarmTableWidget(DataTable):
         super().__init__(*args, **kwargs)
         self.max_rows = max_rows
         self._keys = deque()
+        self._alarms_by_key: dict[object, Alarm] = {}
 
     def on_mount(self) -> None:
         self.border_title = "Live Alarms"
@@ -30,6 +31,7 @@ class AlarmTableWidget(DataTable):
         sev_cell = Text(sev, style=self._severity_style(sev))
         key = self.add_row(ts, sev_cell, src, msg, cond)
         self._keys.append(key)
+        self._alarms_by_key[key] = alarm
         self._trim_rows_if_needed()
         try:
             self.scroll_end(animate=False)
@@ -39,10 +41,21 @@ class AlarmTableWidget(DataTable):
     def _trim_rows_if_needed(self) -> None:
         while len(self._keys) > self.max_rows:
             key = self._keys.popleft()
+            self._alarms_by_key.pop(key, None)
             try:
                 self.remove_row(key)
             except Exception:
                 continue
+
+    def get_selected_alarm(self) -> Alarm | None:
+        row_index = self.cursor_row
+        if row_index < 0 or row_index >= len(self._keys):
+            return None
+        try:
+            key = list(self._keys)[row_index]
+        except IndexError:
+            return None
+        return self._alarms_by_key.get(key)
 
     @staticmethod
     def _severity_style(severity: str) -> str:

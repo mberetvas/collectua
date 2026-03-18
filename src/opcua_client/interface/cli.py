@@ -440,6 +440,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
     )
+    parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
+    parser.add_argument(
+        "--overloads-node-id",
+        default=argparse.SUPPRESS,
+        help="Optional NodeId for the Siemens Overloads state monitor",
+    )
     parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     parser.add_argument(
         "--target-namespace",
@@ -496,6 +507,17 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Socket timeout (seconds)",
     )
+    collect_parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
+    collect_parser.add_argument(
+        "--overloads-node-id",
+        default=argparse.SUPPRESS,
+        help="Optional NodeId for the Siemens Overloads state monitor",
+    )
 
     connect_parser = subparsers.add_parser("connect", help="Connection smoke test (supports secure/insecure)")
     _add_connection_profile_arg(connect_parser)
@@ -524,6 +546,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
     )
+    connect_parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
 
     config_parser = subparsers.add_parser("config", help="Show or validate normalized runtime configuration")
     _add_connection_profile_arg(config_parser)
@@ -551,6 +579,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
+    config_parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
+    config_parser.add_argument(
+        "--overloads-node-id",
+        default=argparse.SUPPRESS,
+        help="Optional NodeId for the Siemens Overloads state monitor",
     )
     config_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
     config_parser.add_argument(
@@ -786,6 +825,8 @@ def main(argv=None) -> int:
                 publish_interval_ms=config.collect.publish_interval_ms,
                 reconnect_delay_sec=config.collect.reconnect_delay_sec,
                 timeout=config.connection.timeout,
+                locales=config.connection.locales,
+                overloads_node_id=config.connection.overloads_node_id or None,
             )
         )
         return 0

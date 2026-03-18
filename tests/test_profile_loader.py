@@ -36,6 +36,26 @@ def test_load_profile_reads_yaml_and_validates_keys(tmp_path: Path, monkeypatch:
     assert loaded["timeout"] == 15.0
 
 
+def test_load_profile_accepts_locales_and_overloads_node_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    profiles_dir = tmp_path / "connections"
+    profiles_dir.mkdir()
+    (profiles_dir / "prod.yaml").write_text(
+        "url: opc.tcp://server:4840\n"
+        "locales:\n"
+        "  - en-US\n"
+        "  - de-DE\n"
+        "overloads_node_id: ns=3;s=Overloads\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(profile_loader, "profile_search_dirs", lambda: [profiles_dir])
+
+    loaded = profile_loader.load_profile("prod")
+
+    assert loaded["locales"] == ["en-US", "de-DE"]
+    assert loaded["overloads_node_id"] == "ns=3;s=Overloads"
+
+
 def test_load_profile_raises_for_unknown_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     profiles_dir = tmp_path / "connections"
     profiles_dir.mkdir()

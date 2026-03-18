@@ -19,6 +19,8 @@ PROFILE_KEYS = {
     "key_file",
     "server_cert",
     "trust_cert",
+    "locales",
+    "overloads_node_id",
     "logging",
     "friendly_name",
     "description",

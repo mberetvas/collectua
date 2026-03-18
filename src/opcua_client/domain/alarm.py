@@ -63,6 +63,7 @@ class Alarm:
     acked_state: bool | None = None
     event_type: str = ""
     event_id: str = ""
+    event_id_bytes: bytes = b""
     raw: str = ""
 
     def __post_init__(self) -> None:
@@ -88,6 +89,7 @@ class Alarm:
         acked_state: bool | None = None,
         event_type: str = "",
         event_id: str = "",
+        event_id_bytes: bytes | bytearray | memoryview | None = None,
         raw: str = "",
     ) -> "Alarm":
         parsed_timestamp = _parse_timestamp(timestamp_utc)
@@ -103,6 +105,7 @@ class Alarm:
             acked_state=acked_state,
             event_type=event_type,
             event_id=event_id,
+            event_id_bytes=_normalize_event_id_bytes(event_id_bytes),
             raw=raw,
         )
 
@@ -135,3 +138,15 @@ def _parse_timestamp(value: datetime | str | None) -> datetime:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def _normalize_event_id_bytes(value: bytes | bytearray | memoryview | None) -> bytes:
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    raise AlarmValidationError(f"Unsupported event_id_bytes value: {value!r}")

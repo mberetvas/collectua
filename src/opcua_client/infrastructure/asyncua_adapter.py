@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Sequence
 
 from asyncua import ua
 
@@ -12,18 +14,20 @@ from opcua_client.config.runtime_config import RuntimeConfig
 
 
 def event_to_alarm(event: Any) -> Alarm:
+    event_id_bytes = _event_id_bytes_from_event(event)
     return Alarm.from_values(
         alarm_id=_condition_id_from_event(event),
         condition_name=str(getattr(event, "ConditionName", "unknown-condition")),
         source_name=str(getattr(event, "SourceName", "unknown-source")),
-        message=str(getattr(event, "Message", "")),
+        message=_message_from_event(event),
         severity=getattr(event, "Severity", None),
         timestamp_utc=getattr(event, "Time", datetime.now(timezone.utc)),
         retain=_bool_or_none(getattr(event, "Retain", None)),
         active_state=_bool_or_none(getattr(event, "ActiveState", None)),
         acked_state=_bool_or_none(getattr(event, "AckedState", None)),
         event_type=str(getattr(event, "EventType", "")),
-        event_id=str(getattr(event, "EventId", "")),
+        event_id=_event_id_text(event_id_bytes),
+        event_id_bytes=event_id_bytes,
         raw=str(event),
     )
 
@@ -92,3 +96,90 @@ def _bool_or_none(value: Any) -> bool | None:
         return bool(inner)
     except Exception:
         return None
+
+
+_PROGRAM_ALARM_PLACEHOLDER_RE = re.compile(r"@(\d+)%([A-Za-z])@")
+
+
+def format_program_alarm_message(message: str, args: Sequence[Any]) -> str:
+    placeholders = list(_PROGRAM_ALARM_PLACEHOLDER_RE.finditer(message))
+    if not placeholders:
+        return message
+
+    formatted = message
+    for match in reversed(placeholders):
+        index = int(match.group(1)) - 1
+        specifier = match.group(2).lower()
+        if specifier not in {"s", "d", "i", "f", "x"}:
+            continue
+        if index < 0 or index >= len(args):
+            return f"{message} [unresolved]"
+        formatted = f"{formatted[:match.start()]}{_stringify_program_alarm_arg(args[index], specifier)}{formatted[match.end():]}"
+    return formatted
+
+
+def _message_from_event(event: Any) -> str:
+    raw_message = _localized_text_to_str(getattr(event, "Message", ""))
+    if not raw_message:
+        return raw_message
+
+    if not _PROGRAM_ALARM_PLACEHOLDER_RE.search(raw_message):
+        return raw_message
+
+    return format_program_alarm_message(raw_message, _event_arguments(event))
+
+
+def _event_arguments(event: Any) -> list[Any]:
+    for attr in ("Arguments", "ClientSpecifiedValues", "ClientSpecifiedValue", "InputArguments"):
+        value = getattr(event, attr, None)
+        if value is None:
+            continue
+        if isinstance(value, (str, bytes, bytearray)):
+            return [value]
+        try:
+            return list(value)
+        except TypeError:
+            return [value]
+    return []
+
+
+def _localized_text_to_str(value: Any) -> str:
+    text = getattr(value, "Text", None)
+    if text is not None:
+        return str(text)
+    return str(value)
+
+
+def _stringify_program_alarm_arg(value: Any, specifier: str) -> str:
+    if specifier in {"d", "i"}:
+        return str(int(value))
+    if specifier == "f":
+        return str(float(value))
+    if specifier == "x":
+        return format(int(value), "x")
+    return str(value)
+
+
+def _event_id_bytes_from_event(event: Any) -> bytes:
+    value = getattr(event, "EventId", None)
+    if value is None:
+        return b""
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, bytearray):
+        return bytes(value)
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    return str(value).encode("utf-8")
+
+
+def _event_id_text(event_id: bytes) -> str:
+    if not event_id:
+        return ""
+    try:
+        decoded = event_id.decode("utf-8")
+    except UnicodeDecodeError:
+        return event_id.hex()
+    if decoded.isprintable():
+        return decoded
+    return event_id.hex()

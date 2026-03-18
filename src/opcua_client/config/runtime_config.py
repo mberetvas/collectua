@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Final
 
-from .env_defaults import get_bool, get_float, get_int, get_int_list, get_str
+from .env_defaults import get_bool, get_float, get_int, get_int_list, get_str, get_str_list
 
 
 @dataclass
@@ -42,6 +42,8 @@ class ConnectionConfig:
     key_file: str = field(default_factory=lambda: get_str("OPCUA_KEY_FILE", ""))
     server_cert: str = field(default_factory=lambda: get_str("OPCUA_SERVER_CERT", ""))
     trust_cert: bool = field(default_factory=lambda: get_bool("OPCUA_TRUST_CERT", False))
+    locales: list[str] = field(default_factory=lambda: get_str_list("OPCUA_LOCALES", []))
+    overloads_node_id: str = field(default_factory=lambda: get_str("OPCUA_OVERLOADS_NODE_ID", ""))
     logging_config: LoggingConfig | None = None
 
 
@@ -114,6 +116,10 @@ class RuntimeConfig:
                 key_file=getattr(args, "key_file", get_str("OPCUA_KEY_FILE", "")),
                 server_cert=getattr(args, "server_cert", get_str("OPCUA_SERVER_CERT", "")),
                 trust_cert=bool(getattr(args, "trust_cert", get_bool("OPCUA_TRUST_CERT", False))),
+                locales=_normalize_locale_ids(getattr(args, "locales", get_str_list("OPCUA_LOCALES", []))),
+                overloads_node_id=str(
+                    getattr(args, "overloads_node_id", get_str("OPCUA_OVERLOADS_NODE_ID", ""))
+                ),
                 logging_config=logging_config,
             ),
             browse=BrowseConfig(
@@ -166,4 +172,23 @@ class RuntimeConfig:
 
     def as_json(self, mask_sensitive: bool = True) -> str:
         return json.dumps(self.as_dict(mask_sensitive=mask_sensitive), indent=2)
+
+
+def _normalize_locale_ids(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        items = value.split(",")
+    else:
+        try:
+            items = list(value)  # type: ignore[arg-type]
+        except TypeError:
+            items = [value]
+
+    normalized: list[str] = []
+    for item in items:
+        token = str(item).strip()
+        if token:
+            normalized.append(token)
+    return normalized
 
