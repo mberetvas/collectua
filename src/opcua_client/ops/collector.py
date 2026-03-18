@@ -15,12 +15,12 @@ from typing import Any, Callable, Mapping, Optional, Protocol
 
 from asyncua import Client, ua
 
-from opcua_client.condition_refresh import condition_refresh_with_retry
-from opcua_client.domain.alarm import Alarm
-from opcua_client.env_defaults import get_float, get_int, get_str
-from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
-from opcua_client.infrastructure.csv_writer import CSVAlarmWriter
-from opcua_client.infrastructure.repositories import InMemoryAlarmRepository
+from ..config.env_defaults import get_float, get_int, get_str
+from ..domain.alarm import Alarm
+from ..infrastructure.asyncua_adapter import event_to_alarm
+from ..infrastructure.csv_writer import CSVAlarmWriter
+from ..infrastructure.repositories import InMemoryAlarmRepository
+from .condition_refresh import condition_refresh_with_retry
 
 # ──────────────────────── CONFIG ────────────────────────
 CSV_FILE = get_str("OPCUA_CSV_FILE", "alarms.csv")
@@ -331,3 +331,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

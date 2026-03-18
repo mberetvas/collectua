@@ -3,10 +3,10 @@ from __future__ import annotations
 from argparse import Namespace
 from pathlib import Path
 
-from opcua_client import profile_loader
-from opcua_client.cert_paths import get_default_client_cert_paths
-from opcua_client.env_defaults import clear_env_defaults_cache
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config import profile_loader
+from opcua_client.config.env_defaults import clear_env_defaults_cache
+from opcua_client.config.runtime_config import RuntimeConfig
+from opcua_client.security.cert_paths import get_default_client_cert_paths
 
 
 def test_runtime_config_from_namespace_uses_env_defaults(tmp_path: Path, monkeypatch) -> None:

@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import cli
-from opcua_client.runtime_config import (
+from opcua_client.config.runtime_config import (
     BrowseConfig,
     CollectConfig,
     ConnectionConfig,
@@ -17,6 +16,7 @@ from opcua_client.runtime_config import (
     LoggingConfig,
     RuntimeConfig,
 )
+from opcua_client.interface import cli
 
 
 def test_short_policy_from_uri_empty_and_plain() -> None:
@@ -160,7 +160,7 @@ def test_persist_trust_to_profile_updates_yaml(tmp_path: Path, monkeypatch: pyte
     dummy_loader = DummyLoader({"url": "opc.tcp://server:4840"})
 
     # Monkeypatch opcua_client.profile_loader (imported inside _persist_trust_to_profile)
-    import opcua_client.profile_loader as profile_loader_mod
+    import opcua_client.config.profile_loader as profile_loader_mod
 
     monkeypatch.setattr(profile_loader_mod, "load_profile", dummy_loader.load_profile)
     monkeypatch.setattr(cli, "resolve_profile_path", lambda name: profile_path)

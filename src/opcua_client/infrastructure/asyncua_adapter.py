@@ -8,7 +8,7 @@ from asyncua import ua
 from opcua_client.domain.alarm import Alarm
 from opcua_client.domain.connection import OPCUAConnection
 from opcua_client.domain.node import Node, NodeClass, NodeId
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config.runtime_config import RuntimeConfig
 
 
 def event_to_alarm(event: Any) -> Alarm:

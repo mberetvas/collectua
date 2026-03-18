@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from opcua_client.runtime_config import (
+from opcua_client.config.runtime_config import (
     BrowseConfig,
     CollectConfig,
     ConnectionConfig,

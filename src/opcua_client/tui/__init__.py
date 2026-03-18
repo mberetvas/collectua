@@ -1,10 +1,10 @@
 import argparse
 import sys
 
-from opcua_client import browse, collector
-from opcua_client.env_defaults import get_int_list, get_str
-from opcua_client.profile_loader import list_profiles, load_profile
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config.env_defaults import get_int_list, get_str
+from opcua_client.config.profile_loader import list_profiles, load_profile
+from opcua_client.config.runtime_config import RuntimeConfig
+from opcua_client.ops import browse, collector
 
 from .app import OpcuaTuiApp
 

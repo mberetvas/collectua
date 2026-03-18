@@ -14,7 +14,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
-from .env_defaults import get_formatted_str, get_path, get_str
+from ..config.env_defaults import get_formatted_str, get_path, get_str
 
 _logger = logging.getLogger("certs")
 
@@ -159,3 +159,4 @@ def ensure_client_certificates() -> tuple[str, str]:
             ) from exc
 
     return str(paths.cert_file), str(paths.key_file)
+

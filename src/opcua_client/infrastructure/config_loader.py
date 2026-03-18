@@ -4,8 +4,8 @@ from argparse import Namespace
 from typing import Any
 
 from opcua_client.domain.connection import OPCUAConnection
-from opcua_client.profile_loader import load_profile
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config.profile_loader import load_profile
+from opcua_client.config.runtime_config import RuntimeConfig
 
 
 def load_connection_from_profile(profile_name: str) -> OPCUAConnection:

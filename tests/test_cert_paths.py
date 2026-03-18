@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from opcua_client.cert_paths import ensure_client_certificates, get_default_client_cert_paths
+from opcua_client.security.cert_paths import ensure_client_certificates, get_default_client_cert_paths
 
 
 def test_default_paths_prefer_certs_under_cwd(tmp_path: Path) -> None:

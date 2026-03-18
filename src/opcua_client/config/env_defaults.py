@@ -142,3 +142,4 @@ def get_formatted_str(name: str, default: str, **kwargs: str) -> str:
         return template.format(**kwargs)
     except (KeyError, ValueError):
         return template
+

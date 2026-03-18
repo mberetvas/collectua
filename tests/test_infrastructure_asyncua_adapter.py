@@ -8,7 +8,7 @@ from opcua_client.infrastructure.asyncua_adapter import (
     event_to_alarm,
     node_to_domain_node,
 )
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config.runtime_config import RuntimeConfig
 
 
 @dataclass

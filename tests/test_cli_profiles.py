@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import cli, profile_loader
+from opcua_client.config import profile_loader
+from opcua_client.interface import cli
 
 
 def test_cli_config_uses_profile_values(

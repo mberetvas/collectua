@@ -9,8 +9,8 @@ from typing import Any
 
 from asyncua import Client, ua
 
-from .infrastructure.asyncua_adapter import node_to_domain_node
-from .env_defaults import get_float, get_int
+from ..config.env_defaults import get_float, get_int
+from ..infrastructure.asyncua_adapter import node_to_domain_node
 
 MAX_DEPTH = get_int("OPCUA_MAX_DEPTH", 10)
 TIMEOUT = get_float("OPCUA_TIMEOUT", 30.0)
@@ -59,9 +59,7 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
     child_lines: list[str] = []
 
     if depth < max_depth:
-        children = await node.get_children(
-            nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
-        )
+        children = await node.get_children(nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method)
 
         named_children: list[tuple[str, Any]] = []
         for child in children:
@@ -121,3 +119,4 @@ if __name__ == "__main__":
         datefmt="%Y-%m-%d %H:%M:%S",
     )
     main()
+

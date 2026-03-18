@@ -208,3 +208,4 @@ def ensure_profile_for_url_interactive(url: str) -> str:
 
     print(f"Created connection profile '{profile_name}' at {profile_path}")
     return profile_name
+

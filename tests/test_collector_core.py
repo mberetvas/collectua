@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from opcua_client import collector
+from opcua_client.ops import collector
 
 
 class _DummyNodeId:

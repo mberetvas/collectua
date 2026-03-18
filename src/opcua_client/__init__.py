@@ -1,4 +1,4 @@
-from opcua_client.cli import main as cli_main
+from opcua_client.interface.cli import main as cli_main
 
 
 def main() -> int:

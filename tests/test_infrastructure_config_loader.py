@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import profile_loader
+from opcua_client.config import profile_loader
 from opcua_client.infrastructure.config_loader import (
     load_connection_from_cli_args,
     load_connection_from_profile,

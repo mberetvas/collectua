@@ -10,13 +10,13 @@ from pathlib import Path
 import yaml
 from asyncua import Client, ua
 
-from . import browse, collector
-from .cert_paths import ensure_client_certificates
-from .env_defaults import get_bool, get_formatted_str, get_int_list, get_str
-from .infrastructure.config_loader import load_connection_from_cli_args
-from .profile_autosetup import ensure_profile_for_url_interactive
-from .profile_loader import list_profiles, load_profile, resolve_profile_path
-from .runtime_config import RuntimeConfig
+from ..config.env_defaults import get_bool, get_formatted_str, get_int_list, get_str
+from ..config.profile_autosetup import ensure_profile_for_url_interactive
+from ..config.profile_loader import list_profiles, load_profile, resolve_profile_path
+from ..config.runtime_config import RuntimeConfig
+from ..infrastructure.config_loader import load_connection_from_cli_args
+from ..ops import browse, collector
+from ..security.cert_paths import ensure_client_certificates
 
 
 def _configure_logging(
@@ -37,13 +37,16 @@ def _configure_logging(
     Returns:
         Path to debug log file if created, else None
     """
-    from .runtime_config import ConnectionConfig
+    from ..config.runtime_config import ConnectionConfig
 
     # Get root logger and clear any existing handlers to avoid duplicates
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
 
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     # Determine console level: connection config takes precedence
     console_level_str = log_level.upper()
@@ -150,8 +153,7 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
 
     if not matched_cert:
         raise RuntimeError(
-            f"No server certificate available for endpoint with policy={desired_policy}, "
-            f"mode={desired_mode} at {conn.url}"
+            f"No server certificate available for endpoint with policy={desired_policy}, " f"mode={desired_mode} at {conn.url}"
         )
 
     return matched_cert
@@ -172,7 +174,7 @@ def _persist_trust_to_profile(
     """
     Persist trust metadata to the given profile YAML.
     """
-    from . import profile_loader
+    from ..config import profile_loader
 
     payload = profile_loader.load_profile(profile_name)
     payload["server_cert"] = str(server_cert_path)
@@ -213,9 +215,7 @@ async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) 
         profile_path = resolve_profile_path(profile_name)
         cert_path = profile_path.with_suffix(".der")
     else:
-        print(
-            "[trust warning] No connection profile associated with this connection; server trust will not be persisted."
-        )
+        print("[trust warning] No connection profile associated with this connection; server trust will not be persisted.")
 
     print("")
     print("The OPC UA server certificate for this connection is not yet trusted.")
@@ -353,12 +353,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
     parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
-    parser.add_argument(
-        "--publish-interval-ms", type=int, default=collector.PUBLISH_INTERVAL_MS, help="Subscription publish interval"
-    )
-    parser.add_argument(
-        "--reconnect-delay-sec", type=int, default=collector.RECONNECT_DELAY_SEC, help="Reconnect delay in seconds"
-    )
+    parser.add_argument("--publish-interval-ms", type=int, default=collector.PUBLISH_INTERVAL_MS, help="Subscription publish interval")
+    parser.add_argument("--reconnect-delay-sec", type=int, default=collector.RECONNECT_DELAY_SEC, help="Reconnect delay in seconds")
 
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -409,12 +405,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_profile_arg(connect_parser)
     connect_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     connect_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
-    connect_parser.add_argument(
-        "--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)"
-    )
-    connect_parser.add_argument(
-        "--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)"
-    )
+    connect_parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
+    connect_parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
     connect_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
     connect_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
     connect_parser.add_argument(
@@ -441,12 +433,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_connection_profile_arg(config_parser)
     config_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     config_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
-    config_parser.add_argument(
-        "--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)"
-    )
-    config_parser.add_argument(
-        "--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)"
-    )
+    config_parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
+    config_parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
     config_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
     config_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
     config_parser.add_argument(
@@ -501,7 +489,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Show sensitive values such as passwords in output",
     )
 
-    list_profiles_parser = subparsers.add_parser("list-profiles", help="List available connection profiles")
+    subparsers.add_parser("list-profiles", help="List available connection profiles")
 
     return parser
 
@@ -515,7 +503,7 @@ def main(argv=None) -> int:
         if args.command:
             parser.error("--tui cannot be used with subcommands")
         # Import TUI app here to avoid circular imports and keep TUI optional
-        from .tui.app import OpcuaTuiApp
+        from ..tui.app import OpcuaTuiApp
 
         args.command = "tui"
 
@@ -543,7 +531,7 @@ def main(argv=None) -> int:
                 )
                 return 2
             # Use TUI profile chooser function
-            from .tui import _choose_profile_name
+            from ..tui import _choose_profile_name
 
             selected_profile = _choose_profile_name(profiles)
             if not selected_profile:
@@ -720,3 +708,4 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

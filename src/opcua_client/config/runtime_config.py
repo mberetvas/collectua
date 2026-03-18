@@ -22,9 +22,7 @@ class FileLoggingConfig:
 class LoggingConfig:
     """Per-connection logging configuration."""
 
-    level: str = field(
-        default_factory=lambda: get_str("OPCUA_LOG_LEVEL", "INFO")
-    )  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    level: str = field(default_factory=lambda: get_str("OPCUA_LOG_LEVEL", "INFO"))  # DEBUG, INFO, WARNING, ERROR, CRITICAL
     file: FileLoggingConfig = field(default_factory=FileLoggingConfig)
 
 
@@ -114,15 +112,11 @@ class RuntimeConfig:
             ),
             browse=BrowseConfig(
                 max_depth=int(getattr(args, "max_depth", get_int("OPCUA_MAX_DEPTH", 3))),
-                target_namespaces=[
-                    int(ns) for ns in getattr(args, "target_namespace", get_int_list("OPCUA_TARGET_NAMESPACES", []))
-                ],
+                target_namespaces=[int(ns) for ns in getattr(args, "target_namespace", get_int_list("OPCUA_TARGET_NAMESPACES", []))],
             ),
             collect=CollectConfig(
                 csv_file=getattr(args, "csv_file", get_str("OPCUA_CSV_FILE", "alarms.csv")),
-                publish_interval_ms=int(
-                    getattr(args, "publish_interval_ms", get_int("OPCUA_PUBLISH_INTERVAL_MS", 500))
-                ),
+                publish_interval_ms=int(getattr(args, "publish_interval_ms", get_int("OPCUA_PUBLISH_INTERVAL_MS", 500))),
                 reconnect_delay_sec=int(getattr(args, "reconnect_delay_sec", get_int("OPCUA_RECONNECT_DELAY_SEC", 5))),
             ),
         )
@@ -166,3 +160,4 @@ class RuntimeConfig:
 
     def as_json(self, mask_sensitive: bool = True) -> str:
         return json.dumps(self.as_dict(mask_sensitive=mask_sensitive), indent=2)
+

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import profile_loader
+from opcua_client.config import profile_loader
 
 
 def test_list_profiles_dedup_prefers_first_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
