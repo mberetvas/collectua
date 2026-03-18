@@ -95,7 +95,22 @@ def _build_parser() -> argparse.ArgumentParser:
 def _choose_profile_name(profiles: list[str]) -> str | None:
     print("Available connection profiles:")
     for idx, name in enumerate(profiles, start=1):
-        print(f"  {idx}. {name}")
+        display = name
+        try:
+            payload = load_profile(name)
+            friendly = str(payload.get("friendly_name", "")).strip()
+            url = str(payload.get("url", "")).strip()
+            if friendly:
+                if url:
+                    display = f"{friendly} ({name}, {url})"
+                else:
+                    display = f"{friendly} ({name})"
+            elif url:
+                display = f"{url} ({name})"
+        except Exception:
+            # Fall back to the raw profile name if loading fails for any reason.
+            display = name
+        print(f"  {idx}. {display}")
     print("Select a profile number (or 'q' to cancel): ", end="", flush=True)
 
     while True:

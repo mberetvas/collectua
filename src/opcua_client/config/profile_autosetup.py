@@ -26,6 +26,89 @@ def _normalize_url(url: str) -> str:
     return url.strip().rstrip("/").lower()
 
 
+def _generate_suggested_name(url: str) -> str:
+    """
+    Suggest a human-friendly name based on the URL, e.g. host:port.
+    """
+    try:
+        # Avoid hard dependency on urllib at import time in case environments are constrained.
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port
+        if host and port:
+            return f"{host}:{port}"
+        if host:
+            return host
+    except Exception:
+        pass
+    # Fallback: return the normalized URL itself.
+    return _normalize_url(url)
+
+
+def _existing_friendly_names() -> set[str]:
+    """
+    Collect friendly_name values from all existing profiles.
+    """
+    names: set[str] = set()
+    for directory in profile_search_dirs():
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for file_path in sorted(directory.glob("*.yaml")) + sorted(
+            directory.glob("*.yml")
+        ):
+            try:
+                with file_path.open("r", encoding="utf-8") as handle:
+                    payload = yaml.safe_load(handle) or {}
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            raw = payload.get("friendly_name", "")
+            if not raw:
+                continue
+            value = str(raw).strip()
+            if value:
+                names.add(value)
+    return names
+
+
+def _prompt_friendly_name(url: str) -> str:
+    """
+    Prompt the user for an optional friendly name for this connection profile.
+
+    Returns the chosen friendly name, or an empty string if the user does not
+    want to provide one.
+    """
+    suggested = _generate_suggested_name(url)
+    existing = _existing_friendly_names()
+
+    print("")
+    print("You can give this connection profile a human-friendly name.")
+    print(f"Suggested name: {suggested}")
+
+    while True:
+        print("Enter a name to use it, or press Enter to skip: ", end="", flush=True)
+        value = input().strip()
+        if not value:
+            return ""
+
+        if ("/" in value) or ("\\" in value):
+            print("Friendly name must not contain '/' or '\\'. Please try again.")
+            continue
+
+        if value in existing:
+            answer = input(
+                "Another profile already uses this friendly name. "
+                "Use it anyway? [y/N]: "
+            ).strip().lower()
+            if answer != "y":
+                continue
+
+        return value
+
+
 def url_profile_name(url: str) -> str:
     """
     Derive a deterministic, filesystem-safe profile name from the full URL.
@@ -189,6 +272,8 @@ def ensure_profile_for_url_interactive(url: str) -> str:
     directory = _choose_profile_directory_for_creation()
     profile_path = directory / f"{profile_name}.yaml"
 
+    friendly_name = _prompt_friendly_name(url)
+
     payload: dict = {
         "url": url,
         "timeout": get_float("OPCUA_TIMEOUT", 30.0),
@@ -202,6 +287,8 @@ def ensure_profile_for_url_interactive(url: str) -> str:
         "server_cert": "",
         "trust_cert": False,
     }
+    if friendly_name:
+        payload["friendly_name"] = friendly_name
 
     with profile_path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(payload, handle, sort_keys=False)

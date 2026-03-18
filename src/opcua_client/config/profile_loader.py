@@ -20,6 +20,8 @@ PROFILE_KEYS = {
     "server_cert",
     "trust_cert",
     "logging",
+    "friendly_name",
+    "description",
 }
 
 

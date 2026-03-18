@@ -705,7 +705,21 @@ def main(argv=None) -> int:
             return 0
         print("Available connection profiles:")
         for name in profiles:
-            print(f"  - {name}")
+            try:
+                payload = load_profile(name)
+                friendly = str(payload.get("friendly_name", "")).strip()
+                url = str(payload.get("url", "")).strip()
+                if friendly and url:
+                    display = f"{friendly} ({name}, {url})"
+                elif friendly:
+                    display = f"{friendly} ({name})"
+                elif url:
+                    display = f"{url} ({name})"
+                else:
+                    display = name
+            except Exception:
+                display = name
+            print(f"  - {display}")
         return 0
 
     profile_name = getattr(args, "connection_profile", None)

@@ -87,3 +87,35 @@ def test_tui_profile_loader_accepts_server_cert_and_trust_cert(monkeypatch: pyte
     rc = tui.main([])
 
     assert rc == 0
+
+
+def test_tui_profile_listing_uses_friendly_name_when_available(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(tui, "list_profiles", lambda: ["prod"])
+
+    def _fake_load_profile(name: str) -> dict[str, object]:
+        assert name == "prod"
+        return {
+            "url": "opc.tcp://from-profile:4840",
+            "timeout": 22.0,
+            "friendly_name": "Plant OPC Server",
+        }
+
+    # Capture the printed profile list.
+    monkeypatch.setattr(tui, "load_profile", _fake_load_profile)
+
+    # Simulate user selecting the first (and only) profile.
+    monkeypatch.setattr(tui, "_choose_profile_name", lambda profiles: "prod")
+
+    class _App(_DummyApp):
+        def __init__(self, config):
+            super().__init__(config)
+
+    monkeypatch.setattr(tui, "OpcuaTuiApp", _App)
+
+    rc = tui.main([])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Plant OPC Server" in out
