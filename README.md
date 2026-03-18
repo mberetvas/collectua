@@ -117,6 +117,8 @@ pytest
 ## Project Structure
 
 - `src/opcua_client/`: All actual source code, organized by function.
+  - `domain/`: DDD-style entities/value objects (`Alarm`, `OPCUAConnection`, `Node`) with domain validation.
+  - `infrastructure/`: Adapters/repositories that map asyncua, config, and CSV persistence to domain models.
   - `tui/widgets/`: Each TUI panel or widget here, as proper python modules.
   - `cli.py`: All commands live here. Yes, it's a big script; hire an intern for refactoring.
   - `profile_loader.py`, `profile_autosetup.py`: Handle connection profiles so you don't have to think.

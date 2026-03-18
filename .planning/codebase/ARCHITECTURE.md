@@ -29,19 +29,26 @@
 - Depends on: CLI infrastructure (collector, browsing), config, logging
 - Used by: CLI with `--tui` flag
 
-**Business Logic Layer:**
-- Purpose: Core data collection and node traversal
-- Location: `src/opcua_client/collector.py`, `src/opcua_client/browse.py`, `src/opcua_client/condition_refresh.py`
-- Contains: Alarm subscription logic, CSV export, node tree traversal
-- Depends on: Infrastructure (asyncua, config)
-- Used by: CLI and TUI layers
+**Domain Layer:**
+- Purpose: Model OPC UA business concepts as entities and value objects
+- Location: `src/opcua_client/domain/alarm.py`, `src/opcua_client/domain/connection.py`, `src/opcua_client/domain/node.py`, `src/opcua_client/domain/exceptions.py`
+- Contains: `Alarm`, `OPCUAConnection`, `Node`, value objects (`AlarmId`, `AlarmSeverity`, `SecurityMode`, `NodeId`) and domain exceptions
+- Depends on: Standard library + `asyncua` types only
+- Used by: Infrastructure adapters and higher layers
 
 **Infrastructure Layer:**
-- Purpose: External service integration, credentials, configuration
-- Location: `src/opcua_client/runtime_config.py`, `src/opcua_client/profile_loader.py`, `src/opcua_client/cert_paths.py`, `src/opcua_client/env_defaults.py`, `src/opcua_client/profile_autosetup.py`, `src/opcua_client/generate_certificates.py`
-- Contains: Config dataclasses, YAML profile loading, certificate generation, environment variable resolution
-- Depends on: Third-party libs (asyncua, pyyaml)
-- Used by: All layers
+- Purpose: Adapt external formats and runtime configuration to domain objects
+- Location: `src/opcua_client/infrastructure/asyncua_adapter.py`, `src/opcua_client/infrastructure/config_loader.py`, `src/opcua_client/infrastructure/csv_writer.py`, `src/opcua_client/infrastructure/repositories.py`
+- Contains: Event/node adapters, config mappers, CSV persistence adapter, repository interfaces/stubs
+- Depends on: Domain layer + runtime/config modules + third-party libs
+- Used by: CLI/TUI and future application use-cases
+
+**Legacy Service Layer:**
+- Purpose: Keep existing command behavior stable while domain extraction is introduced
+- Location: `src/opcua_client/collector.py`, `src/opcua_client/browse.py`, `src/opcua_client/condition_refresh.py`
+- Contains: Subscription wiring, browse recursion, reconnect orchestration
+- Depends on: `asyncua`, env defaults, logging, and (incrementally) infrastructure/domain
+- Used by: CLI and TUI entrypoints
 
 ## Data Flow
 
@@ -82,6 +89,16 @@
 - Persistent: Connection profiles (YAML), CSV exports, debug logs (filesystem)
 - Configuration: Loaded once at startup, cached via `@lru_cache` for .env parsing
 
+## Dependency Rules
+
+Use this dependency direction when adding code:
+
+1. `src/opcua_client/domain/*` -> may import: stdlib, `asyncua`, `src/opcua_client/domain/*`
+2. `src/opcua_client/infrastructure/*` -> may import: domain modules + runtime/config/profile modules
+3. `src/opcua_client/cli.py` and `src/opcua_client/tui/*` -> may import: infrastructure/domain and legacy service modules
+
+Domain modules must not import `src/opcua_client/collector.py`, `src/opcua_client/browse.py`, `src/opcua_client/runtime_config.py`, `src/opcua_client/cli.py`, or `src/opcua_client/tui/*`.
+
 ## Key Abstractions
 
 **ConnectionConfig:**
@@ -104,6 +121,21 @@
 - Purpose: Snapshot of an active alarm keyed by ConditionId
 - Examples: `src/opcua_client/collector.py` (frozen dataclass)
 - Pattern: Immutable record for deduplication and state tracking
+
+**Alarm (Domain):**
+- Purpose: Canonical domain entity for alarm/event state
+- Examples: `src/opcua_client/domain/alarm.py`
+- Pattern: Immutable entity with invariants and helper methods (`is_active`, `is_acknowledged`, `is_retained`)
+
+**OPCUAConnection (Domain):**
+- Purpose: Canonical connection aggregate root with security/auth metadata
+- Examples: `src/opcua_client/domain/connection.py`
+- Pattern: Validated value object composition (`Credentials`, `SecurityMode`, `AuthPolicy`)
+
+**Node + NodeTree (Domain):**
+- Purpose: Canonical node model and hierarchy abstraction
+- Examples: `src/opcua_client/domain/node.py`
+- Pattern: Entity + in-memory tree helper decoupled from browse transport logic
 
 ## Entry Points
 

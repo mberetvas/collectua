@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **DDD domain and infrastructure foundation** - Added explicit domain and adapter layers for Phase 1 architecture refactor
+  - Added domain package: `src/opcua_client/domain/alarm.py`, `src/opcua_client/domain/connection.py`, `src/opcua_client/domain/node.py`, `src/opcua_client/domain/exceptions.py`
+  - Added infrastructure package: `src/opcua_client/infrastructure/asyncua_adapter.py`, `src/opcua_client/infrastructure/config_loader.py`, `src/opcua_client/infrastructure/csv_writer.py`, `src/opcua_client/infrastructure/repositories.py`
+  - Added focused test coverage for new domain/infrastructure modules under `tests/test_domain_*.py` and `tests/test_infrastructure_*.py`
 - **TUI multi-node selection and bulk Node ID copy** - Select multiple nodes in the Node Tree and copy all Node IDs as newline-separated output for bulk operations
   - Added `Ctrl+Space` to toggle selection of the currently focused node in the Node Tree
   - Added `Esc` to clear the current multi-selection set in the Node Tree
@@ -29,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TUI Node ID quick copy** - Added a `Copy Node ID` button and `Ctrl+Shift+C` shortcut in Node Info to copy the selected node identifier to the system clipboard
 
 ### Changed
+- **Architecture documentation now includes DDD layering guidance**
+  - Updated `.planning/codebase/ARCHITECTURE.md` with domain/infrastructure layers and dependency direction rules
+  - Updated README project structure to reflect new `domain/` and `infrastructure/` directories
 - **Centralized package defaults in `src/opcua_client/.env`**
   - Runtime defaults for CLI, TUI, collector, browse depth, logging, certificate paths, and profile directories are now sourced from `src/opcua_client/.env`
   - Configuration precedence is now CLI args > connection profile YAML > `.env` defaults > code fallback

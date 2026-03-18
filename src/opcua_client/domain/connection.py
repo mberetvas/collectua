@@ -1,0 +1,117 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+from .exceptions import ConnectionValidationError, InvalidOPCUAUrl, InvalidSecurityMode
+
+
+class SecurityMode(str, Enum):
+    NONE = "None_"
+    SIGN = "Sign"
+    SIGN_AND_ENCRYPT = "SignAndEncrypt"
+
+    @classmethod
+    def from_value(cls, value: str | None) -> "SecurityMode":
+        if value is None:
+            return cls.NONE
+        for mode in cls:
+            if mode.value.lower() == value.lower():
+                return mode
+        raise InvalidSecurityMode(f"Unsupported security mode: {value}")
+
+
+class AuthPolicy(str, Enum):
+    NONE = "None"
+    USERNAME = "Username"
+    CERTIFICATE = "Certificate"
+
+    @classmethod
+    def from_value(cls, value: str | None) -> "AuthPolicy":
+        if value is None or value.strip() == "":
+            return cls.NONE
+        normalized = value.strip().lower()
+        if normalized in {"none", "anonymous"}:
+            return cls.NONE
+        if normalized in {"username", "usernamepassword"}:
+            return cls.USERNAME
+        if normalized in {"certificate", "x509"}:
+            return cls.CERTIFICATE
+        return cls.NONE
+
+
+@dataclass(frozen=True)
+class Credentials:
+    username: str = ""
+    password: str = ""
+
+    def is_username_auth(self) -> bool:
+        return bool(self.username)
+
+    def is_certificate_auth(self) -> bool:
+        return not self.username and not self.password
+
+
+@dataclass(frozen=True)
+class OPCUAConnection:
+    url: str
+    timeout: float
+    session_timeout: int
+    request_timeout: int
+    security_mode: SecurityMode
+    auth_policy: AuthPolicy
+    credentials: Credentials
+    cert_file: str = ""
+    key_file: str = ""
+    server_cert: str = ""
+    trust_cert: bool = False
+
+    def __post_init__(self) -> None:
+        if not self.url.startswith("opc.tcp://"):
+            raise InvalidOPCUAUrl("url must start with opc.tcp://")
+        if self.timeout <= 0:
+            raise ConnectionValidationError("timeout must be greater than 0")
+        if self.session_timeout <= 0:
+            raise ConnectionValidationError("session_timeout must be greater than 0")
+        if self.request_timeout <= 0:
+            raise ConnectionValidationError("request_timeout must be greater than 0")
+
+    @classmethod
+    def from_values(
+        cls,
+        *,
+        url: str,
+        timeout: float = 30.0,
+        session_timeout: int = 60000,
+        request_timeout: int = 20000,
+        security_mode: str | None = None,
+        auth_policy: str | None = None,
+        username: str = "",
+        password: str = "",
+        cert_file: str = "",
+        key_file: str = "",
+        server_cert: str = "",
+        trust_cert: bool = False,
+    ) -> "OPCUAConnection":
+        return cls(
+            url=url,
+            timeout=float(timeout),
+            session_timeout=int(session_timeout),
+            request_timeout=int(request_timeout),
+            security_mode=SecurityMode.from_value(security_mode),
+            auth_policy=AuthPolicy.from_value(auth_policy),
+            credentials=Credentials(username=username, password=password),
+            cert_file=cert_file,
+            key_file=key_file,
+            server_cert=server_cert,
+            trust_cert=trust_cert,
+        )
+
+    def is_secure(self) -> bool:
+        return self.security_mode != SecurityMode.NONE
+
+    def requires_client_cert(self) -> bool:
+        return self.is_secure() and bool(self.cert_file and self.key_file)
+
+    def is_trusted(self) -> bool:
+        return self.trust_cert or not self.is_secure()
