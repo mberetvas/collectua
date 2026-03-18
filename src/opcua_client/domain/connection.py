@@ -27,6 +27,10 @@ class AuthPolicy(str, Enum):
 
     Note: user authentication is determined separately by credentials (anonymous vs username/password),
     while this field selects the security policy used for the secure channel.
+    
+    Enum values use OPC UA URI format (with underscores, e.g. Aes128_Sha256_RsaOaep).
+    Use to_asyncua_format() when passing to asyncua's set_security_string() which expects
+    format without underscores (e.g. Aes128Sha256RsaOaep).
     """
 
     NONE = "None"
@@ -45,10 +49,36 @@ class AuthPolicy(str, Enum):
             return cls.NONE
         if normalized.lower() in {"none"}:
             return cls.NONE
+        # Handle both OPC UA format (with underscores) and asyncua format (without)
         for policy in cls:
             if policy.value.lower() == normalized.lower():
                 return policy
+            # Try matching asyncua format (without underscores)
+            asyncua_fmt = policy.to_asyncua_format()
+            if asyncua_fmt.lower() == normalized.lower():
+                return policy
         # Unknown policy -> treat as None to keep backward compatibility.
+        return cls.NONE
+
+    def to_asyncua_format(self) -> str:
+        """
+        Convert to asyncua's expected format (no underscores).
+        
+        OPC UA uses underscores in security policy names (e.g., Aes128_Sha256_RsaOaep),
+        but asyncua SecurityPolicy classes don't (e.g., SecurityPolicyAes128Sha256RsaOaep).
+        """
+        return self.value.replace("_", "")
+
+    @classmethod
+    def from_asyncua_format(cls, value: str) -> "AuthPolicy":
+        """Convert from asyncua format (no underscores) to enum."""
+        if not value:
+            return cls.NONE
+        normalized = value.strip().lower()
+        for policy in cls:
+            asyncua_fmt = policy.to_asyncua_format().lower()
+            if asyncua_fmt == normalized:
+                return policy
         return cls.NONE
 
 

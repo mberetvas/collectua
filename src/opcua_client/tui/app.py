@@ -22,8 +22,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane, Button
 
 from opcua_client.domain.alarm import Alarm
+from opcua_client.domain.connection import AuthPolicy
 from opcua_client.config.env_defaults import get_formatted_str
 from opcua_client.config.runtime_config import RuntimeConfig
+from opcua_client.infrastructure.asyncua_compat import patch_create_session_server_uri
 from opcua_client.ops.condition_refresh import condition_refresh_with_retry
 from opcua_client.ops.collector import CSV_HEADERS, subscribe as collector_subscribe
 from opcua_client.security.cert_paths import ensure_client_certificates
@@ -535,6 +537,7 @@ class OpcuaTuiApp(App[None]):
 
     async def _create_client(self) -> Client:
         conn = self.config.connection
+        auth_policy = AuthPolicy.from_value(conn.auth_policy)
         client = Client(url=conn.url, timeout=conn.timeout)
         client.application_uri = get_formatted_str(
             "OPCUA_CLIENT_APP_URI_TEMPLATE",
@@ -555,30 +558,24 @@ class OpcuaTuiApp(App[None]):
                 cert_file, key_file = conn.cert_file, conn.key_file
             else:
                 cert_file, key_file = ensure_client_certificates()
-            await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
-            selected_endpoint_app_uri = ""
+            await client.set_security_string(
+                f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}"
+            )
+            replacement_server_uri = conn.url
             try:
-                eps = await client.connect_and_get_server_endpoints()
-                for ep in eps:
-                    policy_short = (getattr(ep, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
-                    mode_name = getattr(getattr(ep, "SecurityMode", None), "name", "")
+                endpoints = await client.connect_and_get_server_endpoints()
+                for endpoint in endpoints:
+                    policy_short = (getattr(endpoint, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
+                    mode_name = getattr(getattr(endpoint, "SecurityMode", None), "name", "")
                     normalized_mode = "None_" if mode_name == "None" else mode_name
-                    if policy_short == conn.auth_policy and normalized_mode == conn.security_mode:
-                        selected_endpoint_app_uri = str(
-                            getattr(getattr(ep, "Server", None), "ApplicationUri", "") or ""
-                        )
+                    if policy_short == auth_policy.value and normalized_mode == conn.security_mode:
+                        advertised_uri = str(getattr(getattr(endpoint, "Server", None), "ApplicationUri", "") or "")
+                        if advertised_uri:
+                            replacement_server_uri = advertised_uri
                         break
             except Exception:
                 pass
-            if selected_endpoint_app_uri:
-                original_create_session = client.uaclient.create_session
-
-                async def _patched_create_session(parameters):
-                    parameters.ServerUri = selected_endpoint_app_uri
-                    return await original_create_session(parameters)
-
-                client.uaclient.create_session = _patched_create_session
-
+            patch_create_session_server_uri(client, replacement_server_uri)
         return client
 
     async def _run_connection_supervisor(self) -> None:

@@ -14,6 +14,8 @@ from ..config.env_defaults import get_bool, get_formatted_str, get_int_list, get
 from ..config.profile_autosetup import ensure_profile_for_url_interactive
 from ..config.profile_loader import list_profiles, load_profile, resolve_profile_path
 from ..config.runtime_config import RuntimeConfig
+from ..domain.connection import AuthPolicy
+from ..infrastructure.asyncua_compat import patch_create_session_server_uri
 from ..infrastructure.config_loader import load_connection_from_cli_args
 from ..ops import browse, collector
 from ..security.cert_paths import ensure_client_certificates
@@ -343,7 +345,23 @@ async def _connect_smoke(config: RuntimeConfig):
                 cert_file, key_file = conn.cert_file, conn.key_file
             else:
                 cert_file, key_file = ensure_client_certificates()
-            await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
+            auth_policy = AuthPolicy.from_value(conn.auth_policy)
+            await client.set_security_string(f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}")
+            replacement_server_uri = conn.url
+            try:
+                endpoints = await client.connect_and_get_server_endpoints()
+                for endpoint in endpoints:
+                    policy_short = (getattr(endpoint, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
+                    mode_name = getattr(getattr(endpoint, "SecurityMode", None), "name", "")
+                    normalized_mode = "None_" if mode_name == "None" else mode_name
+                    if policy_short == auth_policy.value and normalized_mode == conn.security_mode:
+                        advertised_uri = str(getattr(getattr(endpoint, "Server", None), "ApplicationUri", "") or "")
+                        if advertised_uri:
+                            replacement_server_uri = advertised_uri
+                        break
+            except Exception:
+                pass
+            patch_create_session_server_uri(client, replacement_server_uri)
 
         await client.connect()
         logger.info("Connected. Negotiated session timeout: %dms", client.session_timeout)

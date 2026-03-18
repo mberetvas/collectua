@@ -31,7 +31,7 @@ def test_connection_helpers_and_credentials() -> None:
     connection = OPCUAConnection.from_values(
         url="opc.tcp://server:4840",
         security_mode="Sign",
-        auth_policy="Username",
+        auth_policy="Basic256Sha256",
         username="operator",
         password="secret",
         cert_file="cert.pem",
@@ -41,4 +41,4 @@ def test_connection_helpers_and_credentials() -> None:
     assert connection.requires_client_cert() is True
     assert isinstance(connection.credentials, Credentials)
     assert connection.credentials.is_username_auth() is True
-    assert connection.auth_policy == AuthPolicy.USERNAME
+    assert connection.auth_policy == AuthPolicy.BASIC256SHA256
