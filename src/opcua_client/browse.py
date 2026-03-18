@@ -9,6 +9,7 @@ from typing import Any
 
 from asyncua import Client, ua
 
+from .infrastructure.asyncua_adapter import node_to_domain_node
 from .env_defaults import get_float, get_int
 
 MAX_DEPTH = get_int("OPCUA_MAX_DEPTH", 10)
@@ -76,9 +77,9 @@ async def _browse_recursive(node, depth: int, max_depth: int, target_namespaces:
 
     try:
         name = (await node.read_browse_name()).to_string()
-        node_id = node.nodeid.to_string()
+        domain_node = node_to_domain_node(node)
         node_class = await node.read_node_class()
-        current_line = f"{'  ' * depth}├── {name}  [{node_id}]  ({node_class.name})"
+        current_line = f"{'  ' * depth}├── {name}  [{domain_node.node_id}]  ({node_class.name})"
         return [current_line, *child_lines]
     except ua.UaError as e:
         return [f"{'  ' * depth}├── [error: {e}]", *child_lines]

@@ -6,6 +6,8 @@ from datetime import datetime
 from rich.text import Text
 from textual.widgets import DataTable
 
+from opcua_client.domain.alarm import Alarm
+
 
 class AlarmTableWidget(DataTable):
     def __init__(self, max_rows: int = 1000, *args, **kwargs):
@@ -18,12 +20,12 @@ class AlarmTableWidget(DataTable):
         self.cursor_type = "row"
         self.add_columns("Time", "Severity", "Source", "Message", "Condition")
 
-    def add_event(self, row: dict[str, str]) -> None:
-        ts = self._format_time(row.get("timestamp_utc", ""))
-        sev = row.get("severity", "")
-        src = row.get("source_name", "")
-        msg = row.get("message", "")
-        cond = row.get("condition_name", "")
+    def add_event(self, alarm: Alarm) -> None:
+        ts = self._format_time(alarm.timestamp_utc.isoformat())
+        sev = alarm.severity.value
+        src = alarm.source_name
+        msg = alarm.message
+        cond = alarm.condition_name
 
         sev_cell = Text(sev, style=self._severity_style(sev))
         key = self.add_row(ts, sev_cell, src, msg, cond)
