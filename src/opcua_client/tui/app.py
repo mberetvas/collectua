@@ -63,7 +63,6 @@ class HelpScreen(ModalScreen[None]):
                     "→: Expand node or focus first child",
                     "←: Collapse node or focus parent",
                     "t: Toggle Alarms / Node Info tab",
-                    "a: Show Alarms tab",
                     "?: Help",
                     "r: Reconnect",
                     "p: Toggle config panel",
@@ -297,7 +296,6 @@ class OpcuaTuiApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "reconnect", "Reconnect"),
         Binding("t", "toggle_main_tab", "Toggle Main Tab"),
-        Binding("a", "show_alarm_tab", "Show Alarms"),
         Binding("s", "toggle_node_selection", "Toggle Node Selection"),
         Binding("escape", "clear_node_selection", "Clear Node Selection"),
         Binding("c", "copy_selected_node_id", "Copy Node IDs"),
@@ -324,7 +322,6 @@ class OpcuaTuiApp(App[None]):
         self._node_value_task: asyncio.Task | None = None
         self._shutdown_requested = False
         self._log_handler: TuiSqliteLogHandler | None = None
-        self._log_refresh_task: asyncio.Task | None = None
         self._last_log_row_id: int = 0
         self._selected_node: dict[str, Any] | None = None
         self._pending_focus_first_child_node_ids: set[str] = set()
@@ -373,6 +370,7 @@ class OpcuaTuiApp(App[None]):
 
                         with Vertical(id="log-panel"):
                             with Horizontal(id="log-actions"):
+                                yield Button("Refresh logs", id="btn-refresh-logs", variant="primary")
                                 yield Button("Copy Logs", id="btn-copy-logs", variant="default")
                                 yield Button("Copy Errors", id="btn-copy-errors", variant="error")
                             yield LogStreamWidget(id="log-stream")
@@ -407,11 +405,6 @@ class OpcuaTuiApp(App[None]):
         root_logger.addHandler(self._log_handler)
         root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
 
-        # Start the refresh loop if Logs tab is active by default, otherwise wait for activation.
-        tabbed = self.query_one("#tabbed-panel", TabbedContent)
-        if tabbed.active == "tab-logs":
-            self._start_log_refresh_loop()
-
         # Do not block the Mount message handler on splash dismissal.
         # Textual screen lifecycle callbacks are message-pump driven, so startup
         # continues from the dismiss callback once the splash is gone.
@@ -429,43 +422,6 @@ class OpcuaTuiApp(App[None]):
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
         tabbed.active = "tab-logs" if tabbed.active != "tab-logs" else "tab-alarms"
 
-    def _start_log_refresh_loop(self) -> None:
-        """Start the background task that periodically refreshes logs from SQLite."""
-        if self._log_refresh_task is None or self._log_refresh_task.done():
-            self._log_refresh_task = asyncio.create_task(self._run_log_refresh_loop())
-
-    def _stop_log_refresh_loop(self) -> None:
-        """Cancel the background log refresh task."""
-        if self._log_refresh_task and not self._log_refresh_task.done():
-            self._log_refresh_task.cancel()
-            self._log_refresh_task = None
-
-    async def _run_log_refresh_loop(self) -> None:
-        """Periodically query SQLite for new log entries and update the LogStreamWidget."""
-        if not self._log_handler:
-            return
-
-        interval = self.config.log_refresh_interval_sec
-        while not self._shutdown_requested:
-            try:
-                # Query new rows since last_id.
-                new_rows = self._log_handler.fetch_since(self._last_log_row_id, limit=1000)
-                if new_rows:
-                    # Import style_for_level locally to avoid circular import.
-                    from .widgets.log_stream import style_for_level
-
-                    log_stream = self.query_one("#log-stream")
-                    for row in new_rows:
-                        formatted = f"{row.timestamp_utc[:19]} {row.levelname} {row.logger_name}: {row.message}"
-                        log_stream.add_entry(
-                            Text(formatted, style=style_for_level(row.levelno)),
-                            levelno=row.levelno,
-                        )
-                    self._last_log_row_id = new_rows[-1].id
-            except Exception:
-                _logger.exception("Error refreshing logs from SQLite")
-
-            await asyncio.sleep(interval)
 
     def _load_all_logs(self) -> None:
         """Load all logs from SQLite into the widget (used when switching to Logs tab)."""
@@ -569,6 +525,10 @@ class OpcuaTuiApp(App[None]):
     @on(Button.Pressed, "#btn-copy-errors")
     def on_copy_errors_button(self) -> None:
         self.action_copy_errors()
+
+    @on(Button.Pressed, "#btn-refresh-logs")
+    def on_refresh_logs_button(self) -> None:
+        self._load_all_logs()
 
     async def _create_client(self) -> Client:
         conn = self.config.connection
@@ -1121,24 +1081,13 @@ class OpcuaTuiApp(App[None]):
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
         tabbed.active = "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
 
-    def action_show_alarm_tab(self) -> None:
-        self.query_one("#tabbed-panel", TabbedContent).active = "tab-alarms"
-
     @on(TabbedContent.TabActivated, "#tabbed-panel")
     def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
-        # Use the activated pane's id to decide whether to start/stop log refresh.
-        tab_id = getattr(event.pane, "id", None)
-        if tab_id == "tab-logs":
-            # When entering Logs tab, load all existing logs and start the refresh loop.
-            self._load_all_logs()
-            self._start_log_refresh_loop()
-        else:
-            # When leaving Logs tab, stop the refresh loop.
-            self._stop_log_refresh_loop()
+        # Tab activation handler - log refresh is now handled manually via the refresh button.
+        pass
 
     async def action_quit(self) -> None:
         self._shutdown_requested = True
-        self._stop_log_refresh_loop()
         if self._runner_task and not self._runner_task.done():
             self._runner_task.cancel()
             try:
