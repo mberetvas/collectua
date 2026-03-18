@@ -27,3 +27,6 @@ stop-server:
 
 run-tui url='':
     @uv run collectua --tui {{ if url == "" { "" } else { "--url " + url } }}
+
+test:
+    uv run pytest
