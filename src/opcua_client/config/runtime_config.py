@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 
 from dataclasses import asdict, dataclass, field
+from datetime import timedelta
+from typing import Final
 
 from .env_defaults import get_bool, get_float, get_int, get_int_list, get_str
 
@@ -65,6 +67,10 @@ class RuntimeConfig:
     collect: CollectConfig = field(default_factory=CollectConfig)
     mode: str = field(default_factory=lambda: get_str("OPCUA_MODE", "prod"))
     debug_log_dir: str = field(default_factory=lambda: get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"))
+    # SQLite-backed TUI log storage configuration
+    log_db_path: str | None = field(default_factory=lambda: get_str("OPCUA_TUI_LOG_DB_PATH", "") or None)
+    log_retention_days: int = field(default_factory=lambda: get_int("OPCUA_TUI_LOG_RETENTION_DAYS", 7))
+    log_refresh_interval_sec: int = field(default_factory=lambda: get_int("OPCUA_TUI_LOG_REFRESH_INTERVAL_SEC", 5))
 
     @classmethod
     def from_namespace(cls, args) -> "RuntimeConfig":

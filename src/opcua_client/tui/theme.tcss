@@ -38,17 +38,11 @@ Footer {
 
 #node-tree,
 #config-panel,
-#alarm-table,
-#log-stream {
+#alarm-table {
     border: round #2a7d3e;
     background: #071207;
     padding: 0 1;
     margin-bottom: 1;
-}
-
-/* #log-stream margin is handled by its parent #log-panel */
-#log-panel #log-stream {
-    margin-bottom: 0;
 }
 
 #node-tree {
@@ -64,15 +58,6 @@ Footer {
 #alarm-table {
     height: 1fr;
     border-title-color: #ffbf4d;
-}
-
-#log-stream {
-    height: 12;
-    border-title-color: #ffbf4d;
-}
-
-#log-panel {
-    margin-bottom: 1;
 }
 
 #log-actions {
@@ -95,11 +80,6 @@ Footer {
 #log-actions #btn-copy-errors {
     color: #ff5f5f;
     border: tall #ff5f5f;
-}
-
-#log-panel #log-stream {
-    border-top: none;
-    margin-bottom: 0;
 }
 
 #node-search {
@@ -204,7 +184,20 @@ Footer {
 }
 
 #tab-alarms,
-#tab-node-info {
+#tab-node-info,
+#tab-logs {
     height: 1fr;
     padding: 0;
+}
+
+#tab-logs #log-panel {
+    height: 1fr;
+    margin-bottom: 0;
+}
+
+#tab-logs #log-stream {
+    height: 1fr;
+    border: round #2a7d3e;
+    background: #071207;
+    padding: 0 1;
 }

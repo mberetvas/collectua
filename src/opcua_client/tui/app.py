@@ -34,7 +34,7 @@ from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
 from .widgets.connection_status import ConnectionStatusWidget
-from .widgets.log_stream import TuiLogHandler
+from .widgets.log_stream import TuiSqliteLogHandler
 from .widgets.node_info_panel import NodeInfoPanelWidget
 from .widgets.node_tree import NodeTreeWidget
 
@@ -67,7 +67,7 @@ class HelpScreen(ModalScreen[None]):
                     "?: Help",
                     "r: Reconnect",
                     "p: Toggle config panel",
-                    "v: Toggle logs panel",
+                    "v: Toggle Logs tab",
                     "q: Quit",
                     "",
                     "This dashboard is read-only and streams alarms/events in real-time.",
@@ -323,11 +323,11 @@ class OpcuaTuiApp(App[None]):
         self._runner_task: asyncio.Task | None = None
         self._node_value_task: asyncio.Task | None = None
         self._shutdown_requested = False
-        self._log_handler: TuiLogHandler | None = None
+        self._log_handler: TuiSqliteLogHandler | None = None
+        self._log_refresh_task: asyncio.Task | None = None
+        self._last_log_row_id: int = 0
         self._selected_node: dict[str, Any] | None = None
         self._pending_focus_first_child_node_ids: set[str] = set()
-        # 0 = default layout, 1 = right-column logs, 2 = full-screen logs
-        self._log_mode: int = 0
         self._search_query: str = ""
         self._search_results: list[Any] = []
         self._search_index: int = 0
@@ -368,20 +368,32 @@ class OpcuaTuiApp(App[None]):
                         yield AlarmTableWidget(id="alarm-table")
                     with TabPane("Node Info", id="tab-node-info"):
                         yield NodeInfoPanelWidget(id="node-info-content")
-                from .widgets.log_stream import LogStreamWidget
+                    with TabPane("Logs", id="tab-logs"):
+                        from .widgets.log_stream import LogStreamWidget
 
-                with Vertical(id="log-panel"):
-                    with Horizontal(id="log-actions"):
-                        yield Button("Copy Logs", id="btn-copy-logs", variant="default")
-                        yield Button("Copy Errors", id="btn-copy-errors", variant="error")
-                    yield LogStreamWidget(id="log-stream")
+                        with Vertical(id="log-panel"):
+                            with Horizontal(id="log-actions"):
+                                yield Button("Copy Logs", id="btn-copy-logs", variant="default")
+                                yield Button("Copy Errors", id="btn-copy-errors", variant="error")
+                            yield LogStreamWidget(id="log-stream")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.query_one(ConfigPanel).set_config(asdict(self.config))
 
+        # Determine log DB path: use explicit config or default to user app data dir.
+        db_path = self.config.log_db_path
+        if not db_path:
+            user_home = Path.home()
+            log_dir = user_home / ".collectua" / "tui"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(log_dir / "logs.db")
+
         log_stream = self.query_one("#log-stream")
-        self._log_handler = TuiLogHandler(log_stream)
+        self._log_handler = TuiSqliteLogHandler(
+            Path(db_path),
+            retention_days=self.config.log_retention_days,
+        )
         root_logger = logging.getLogger()
 
         # When launched via the CLI, logging is configured with a console StreamHandler that
@@ -394,6 +406,11 @@ class OpcuaTuiApp(App[None]):
 
         root_logger.addHandler(self._log_handler)
         root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
+
+        # Start the refresh loop if Logs tab is active by default, otherwise wait for activation.
+        tabbed = self.query_one("#tabbed-panel", TabbedContent)
+        if tabbed.active == "tab-logs":
+            self._start_log_refresh_loop()
 
         # Do not block the Mount message handler on splash dismissal.
         # Textual screen lifecycle callbacks are message-pump driven, so startup
@@ -408,64 +425,81 @@ class OpcuaTuiApp(App[None]):
             return
         self._runner_task = asyncio.create_task(self._run_connection_supervisor())
 
-    def _apply_log_mode(self) -> None:
-        log_panel = self.query_one("#log-panel")
-        log_stream = self.query_one("#log-stream")
-        config_panel = self.query_one(ConfigPanel)
-        tabbed = self.query_one("#tabbed-panel", TabbedContent)
-        header = self.query_one(Header)
-        status = self.query_one("#connection-status", ConnectionStatusWidget)
-        left_column = self.query_one("#left-column")
-        right_column = self.query_one("#right-column")
-        footer = self.query_one(Footer)
-
-        if self._log_mode == 0:
-            # Default: full dashboard layout.
-            header.display = True
-            status.display = True
-            left_column.display = True
-            right_column.display = True
-            footer.display = True
-
-            log_panel.display = True
-            log_stream.styles.height = None  # defer to CSS (fixed height)
-            right_column.styles.width = None
-
-            tabbed.display = True
-            config_panel.display = True
-        elif self._log_mode == 1:
-            # Full-width/right-column logs, hide config panel.
-            header.display = True
-            status.display = True
-            left_column.display = True
-            right_column.display = True
-            footer.display = True
-
-            log_panel.display = True
-            log_stream.styles.height = "1fr"
-            right_column.styles.width = None
-
-            tabbed.display = False
-            config_panel.display = False
-        else:
-            # Full-screen logs: hide main content except connection status + footer.
-            header.display = False
-            status.display = True
-            left_column.display = False
-            footer.display = True
-
-            right_column.display = True
-            right_column.styles.width = "1fr"
-
-            log_panel.display = True
-            log_stream.styles.height = "1fr"
-
-            tabbed.display = False
-            config_panel.display = False
-
     def action_toggle_logs(self) -> None:
-        self._log_mode = (self._log_mode + 1) % 3
-        self._apply_log_mode()
+        tabbed = self.query_one("#tabbed-panel", TabbedContent)
+        tabbed.active = "tab-logs" if tabbed.active != "tab-logs" else "tab-alarms"
+
+    def _start_log_refresh_loop(self) -> None:
+        """Start the background task that periodically refreshes logs from SQLite."""
+        if self._log_refresh_task is None or self._log_refresh_task.done():
+            self._log_refresh_task = asyncio.create_task(self._run_log_refresh_loop())
+
+    def _stop_log_refresh_loop(self) -> None:
+        """Cancel the background log refresh task."""
+        if self._log_refresh_task and not self._log_refresh_task.done():
+            self._log_refresh_task.cancel()
+            self._log_refresh_task = None
+
+    async def _run_log_refresh_loop(self) -> None:
+        """Periodically query SQLite for new log entries and update the LogStreamWidget."""
+        if not self._log_handler:
+            return
+
+        interval = self.config.log_refresh_interval_sec
+        while not self._shutdown_requested:
+            try:
+                # Query new rows since last_id.
+                new_rows = self._log_handler.fetch_since(self._last_log_row_id, limit=1000)
+                if new_rows:
+                    # Import style_for_level locally to avoid circular import.
+                    from .widgets.log_stream import style_for_level
+
+                    log_stream = self.query_one("#log-stream")
+                    for row in new_rows:
+                        formatted = f"{row.timestamp_utc[:19]} {row.levelname} {row.logger_name}: {row.message}"
+                        log_stream.add_entry(
+                            Text(formatted, style=style_for_level(row.levelno)),
+                            levelno=row.levelno,
+                        )
+                    self._last_log_row_id = new_rows[-1].id
+            except Exception:
+                _logger.exception("Error refreshing logs from SQLite")
+
+            await asyncio.sleep(interval)
+
+    def _load_all_logs(self) -> None:
+        """Load all logs from SQLite into the widget (used when switching to Logs tab)."""
+        if not self._log_handler:
+            return
+
+        try:
+            from .widgets.log_stream import style_for_level
+
+            # Fetch the most recent rows (descending) to show newest first.
+            self._log_handler.acquire()
+            try:
+                cur = self._log_handler._conn.execute(
+                    "SELECT id, timestamp_utc, levelno, levelname, logger_name, message "
+                    "FROM logs ORDER BY id DESC LIMIT 1000"
+                )
+                rows = cur.fetchall()
+            finally:
+                self._log_handler.release()
+
+            if rows:
+                log_stream = self.query_one("#log-stream")
+                log_stream.clear()
+                # rows are newest-first; we want newest at top of widget, so iterate reversed.
+                for row in reversed(rows):
+                    row_id, ts, levelno, lvlname, logger_name, msg = row
+                    formatted = f"{ts[:19]} {lvlname} {logger_name}: {msg}"
+                    log_stream.add_entry(
+                        Text(formatted, style=style_for_level(levelno)),
+                        levelno=levelno,
+                    )
+                    self._last_log_row_id = row_id
+        except Exception:
+            _logger.exception("Error loading all logs from SQLite")
 
     def _copy_to_clipboard_robust(self, text: str) -> None:
         """Try Textual clipboard first; fall back to pyperclip."""
@@ -1090,8 +1124,21 @@ class OpcuaTuiApp(App[None]):
     def action_show_alarm_tab(self) -> None:
         self.query_one("#tabbed-panel", TabbedContent).active = "tab-alarms"
 
+    @on(TabbedContent.TabActivated, "#tabbed-panel")
+    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        # Use the activated pane's id to decide whether to start/stop log refresh.
+        tab_id = getattr(event.pane, "id", None)
+        if tab_id == "tab-logs":
+            # When entering Logs tab, load all existing logs and start the refresh loop.
+            self._load_all_logs()
+            self._start_log_refresh_loop()
+        else:
+            # When leaving Logs tab, stop the refresh loop.
+            self._stop_log_refresh_loop()
+
     async def action_quit(self) -> None:
         self._shutdown_requested = True
+        self._stop_log_refresh_loop()
         if self._runner_task and not self._runner_task.done():
             self._runner_task.cancel()
             try:
@@ -1102,4 +1149,5 @@ class OpcuaTuiApp(App[None]):
         await self._cleanup_client()
         if self._log_handler:
             logging.getLogger().removeHandler(self._log_handler)
+            self._log_handler.close()
         self.exit()
