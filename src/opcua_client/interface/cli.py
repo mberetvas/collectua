@@ -110,6 +110,34 @@ def _short_policy_from_uri(policy_uri: str) -> str:
     return policy_uri
 
 
+# #region agent log
+def _agent_log(*, runId: str, hypothesisId: str, location: str, message: str, data: dict) -> None:
+    """
+    Debug-mode NDJSON logger for this Cursor session.
+    Writes to: debug-3adc8d.log
+    """
+    import json
+    import time
+
+    payload = {
+        "sessionId": "3adc8d",
+        "runId": runId,
+        "hypothesisId": hypothesisId,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        with open("debug-3adc8d.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+# #endregion agent log
+
+
 async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
     """
     Connect to the OPC UA endpoint in discovery mode and collect the server
@@ -131,7 +159,26 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
     desired_policy = conn.auth_policy or "None"
     desired_mode = conn.security_mode or "None_"
 
+    # #region agent log
+    _agent_log(
+        runId="pre-fix",
+        hypothesisId="A",
+        location="src/opcua_client/interface/cli.py:_collect_server_certificate:desired",
+        message="Computed desired security selector from connection config",
+        data={
+            "url": conn.url,
+            "conn_auth_policy_type": type(conn.auth_policy).__name__,
+            "conn_auth_policy_value": str(conn.auth_policy),
+            "conn_security_mode_type": type(conn.security_mode).__name__,
+            "conn_security_mode_value": str(conn.security_mode),
+            "desired_policy": str(desired_policy),
+            "desired_mode": str(desired_mode),
+        },
+    )
+    # #endregion agent log
+
     matched_cert: bytes | None = None
+    ep_summaries: list[dict] = []
     for ep in endpoints:
         policy_uri = getattr(ep, "SecurityPolicyUri", "") or ""
         policy_short = _short_policy_from_uri(policy_uri)
@@ -140,10 +187,20 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
         mode_name = mode.name
         security_mode = "None_" if mode_name == "None" else mode_name
 
+        raw_cert = getattr(ep, "ServerCertificate", b"") or b""
+        cert_len = len(raw_cert) if not isinstance(raw_cert, memoryview) else raw_cert.nbytes
+        ep_summaries.append(
+            {
+                "policy_short": policy_short,
+                "security_mode": security_mode,
+                "policy_uri": policy_uri,
+                "cert_len": cert_len,
+            }
+        )
+
         if policy_short != desired_policy or security_mode != desired_mode:
             continue
 
-        raw_cert = getattr(ep, "ServerCertificate", b"") or b""
         # asyncua may expose this as bytes, bytearray or memoryview.
         if isinstance(raw_cert, memoryview):
             matched_cert = bytes(raw_cert)
@@ -152,6 +209,20 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
         break
 
     if not matched_cert:
+        # #region agent log
+        _agent_log(
+            runId="pre-fix",
+            hypothesisId="A",
+            location="src/opcua_client/interface/cli.py:_collect_server_certificate:no-match",
+            message="No endpoint matched desired policy/mode (or cert was empty)",
+            data={
+                "desired_policy": str(desired_policy),
+                "desired_mode": str(desired_mode),
+                "endpoint_count": len(endpoints),
+                "endpoints": ep_summaries[:12],
+            },
+        )
+        # #endregion agent log
         raise RuntimeError(
             f"No server certificate available for endpoint with policy={desired_policy}, " f"mode={desired_mode} at {conn.url}"
         )
@@ -328,7 +399,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--auth-policy",
         default=argparse.SUPPRESS,
-        choices=["None", "Basic128Rsa15", "Basic256", "Basic256Sha256"],
+        choices=[
+            "None",
+            "Basic128Rsa15",
+            "Basic256",
+            "Basic256Sha256",
+            "Aes128_Sha256_RsaOaep",
+            "Aes256_Sha256_RsaPss",
+        ],
         help="Security policy",
     )
     parser.add_argument(

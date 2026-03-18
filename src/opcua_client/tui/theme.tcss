@@ -46,6 +46,11 @@ Footer {
     margin-bottom: 1;
 }
 
+/* #log-stream margin is handled by its parent #log-panel */
+#log-panel #log-stream {
+    margin-bottom: 0;
+}
+
 #node-tree {
     height: 1fr;
     border-title-color: #8aff80;
@@ -64,6 +69,37 @@ Footer {
 #log-stream {
     height: 12;
     border-title-color: #ffbf4d;
+}
+
+#log-panel {
+    margin-bottom: 1;
+}
+
+#log-actions {
+    height: 3;
+    align: left middle;
+    padding: 0 1;
+    background: #071207;
+    border: round #2a7d3e;
+    border-bottom: none;
+}
+
+#log-actions Button {
+    min-width: 14;
+    margin-right: 1;
+    background: #081108;
+    color: #8aff80;
+    border: tall #2a7d3e;
+}
+
+#log-actions #btn-copy-errors {
+    color: #ff5f5f;
+    border: tall #ff5f5f;
+}
+
+#log-panel #log-stream {
+    border-top: none;
+    margin-bottom: 0;
 }
 
 #node-search {

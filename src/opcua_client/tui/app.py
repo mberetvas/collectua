@@ -19,7 +19,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane
+from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane, Button
 
 from opcua_client.domain.alarm import Alarm
 from opcua_client.config.env_defaults import get_formatted_str
@@ -55,6 +55,8 @@ class HelpScreen(ModalScreen[None]):
                     "Ctrl+Space: Toggle node multi-selection",
                     "Esc: Clear node multi-selection",
                     "Ctrl+Shift+C: Copy selected Node IDs",
+                    "Ctrl+Shift+L: Copy all logs",
+                    "Ctrl+Shift+E: Copy error logs",
                     "↑/↓: Previous/next sibling node (when Node Tree is focused)",
                     "→: Expand node or focus first child",
                     "←: Collapse node or focus parent",
@@ -296,6 +298,8 @@ class OpcuaTuiApp(App[None]):
         Binding("ctrl+space", "toggle_node_selection", "Toggle Node Selection"),
         Binding("escape", "clear_node_selection", "Clear Node Selection"),
         Binding("ctrl+shift+c", "copy_selected_node_id", "Copy Node IDs"),
+        Binding("ctrl+shift+l", "copy_logs", "Copy Logs"),
+        Binding("ctrl+shift+e", "copy_errors", "Copy Errors"),
         Binding("f1", "help", "Help"),
         Binding("f8", "toggle_logs", "Toggle Logs"),
         Binding("f9", "toggle_config", "Toggle Config"),
@@ -325,6 +329,28 @@ class OpcuaTuiApp(App[None]):
         self._search_results: list[Any] = []
         self._search_index: int = 0
 
+    # #region agent log
+    def _agent_log(self, *, runId: str, hypothesisId: str, location: str, message: str, data: dict) -> None:
+        import json
+        import time
+
+        payload = {
+            "sessionId": "3adc8d",
+            "runId": runId,
+            "hypothesisId": hypothesisId,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        try:
+            with open("debug-3adc8d.log", "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    # #endregion agent log
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield ConnectionStatusWidget(id="connection-status")
@@ -341,7 +367,11 @@ class OpcuaTuiApp(App[None]):
                         yield NodeInfoPanelWidget(id="node-info-content")
                 from .widgets.log_stream import LogStreamWidget
 
-                yield LogStreamWidget(id="log-stream")
+                with Vertical(id="log-panel"):
+                    with Horizontal(id="log-actions"):
+                        yield Button("Copy Logs", id="btn-copy-logs", variant="default")
+                        yield Button("Copy Errors", id="btn-copy-errors", variant="error")
+                    yield LogStreamWidget(id="log-stream")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -376,6 +406,7 @@ class OpcuaTuiApp(App[None]):
         self._runner_task = asyncio.create_task(self._run_connection_supervisor())
 
     def _apply_log_mode(self) -> None:
+        log_panel = self.query_one("#log-panel")
         log_stream = self.query_one("#log-stream")
         config_panel = self.query_one(ConfigPanel)
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
@@ -393,7 +424,7 @@ class OpcuaTuiApp(App[None]):
             right_column.display = True
             footer.display = True
 
-            log_stream.display = True
+            log_panel.display = True
             log_stream.styles.height = None  # defer to CSS (fixed height)
             right_column.styles.width = None
 
@@ -407,7 +438,7 @@ class OpcuaTuiApp(App[None]):
             right_column.display = True
             footer.display = True
 
-            log_stream.display = True
+            log_panel.display = True
             log_stream.styles.height = "1fr"
             right_column.styles.width = None
 
@@ -423,7 +454,7 @@ class OpcuaTuiApp(App[None]):
             right_column.display = True
             right_column.styles.width = "1fr"
 
-            log_stream.display = True
+            log_panel.display = True
             log_stream.styles.height = "1fr"
 
             tabbed.display = False
@@ -432,6 +463,75 @@ class OpcuaTuiApp(App[None]):
     def action_toggle_logs(self) -> None:
         self._log_mode = (self._log_mode + 1) % 3
         self._apply_log_mode()
+
+    def _copy_to_clipboard_robust(self, text: str) -> None:
+        """Try Textual clipboard first; fall back to pyperclip."""
+        try:
+            self.copy_to_clipboard(text)
+        except Exception:
+            import pyperclip
+            pyperclip.copy(text)
+
+    def action_copy_logs(self) -> None:
+        try:
+            log_stream = self.query_one("#log-stream")
+            export_text = getattr(log_stream, "export_text", None)
+            text = export_text() if callable(export_text) else ""
+
+            if not text.strip():
+                self.notify("No logs to copy yet.", timeout=2.0)
+                self._agent_log(
+                    runId="post-fix",
+                    hypothesisId="LOGCOPY",
+                    location="src/opcua_client/tui/app.py:action_copy_logs",
+                    message="Copy logs requested but buffer was empty",
+                    data={},
+                )
+                return
+
+            self._copy_to_clipboard_robust(text)
+            self.notify("Copied logs to clipboard.", timeout=2.0)
+            self._agent_log(
+                runId="post-fix",
+                hypothesisId="LOGCOPY",
+                location="src/opcua_client/tui/app.py:action_copy_logs",
+                message="Copied log buffer to clipboard",
+                data={"chars": len(text), "lines": text.count("\n")},
+            )
+        except Exception as exc:
+            _logger.exception("Failed to copy logs to clipboard")
+            self.notify(f"Failed to copy logs: {exc}", timeout=3.0)
+            self._agent_log(
+                runId="post-fix",
+                hypothesisId="LOGCOPY",
+                location="src/opcua_client/tui/app.py:action_copy_logs",
+                message="Copy logs failed",
+                data={"error": str(exc)},
+            )
+
+    def action_copy_errors(self) -> None:
+        try:
+            log_stream = self.query_one("#log-stream")
+            export_text = getattr(log_stream, "export_text", None)
+            text = export_text(min_level=logging.ERROR) if callable(export_text) else ""
+
+            if not text.strip():
+                self.notify("No errors to copy yet.", timeout=2.0)
+                return
+
+            self._copy_to_clipboard_robust(text)
+            self.notify("Copied error logs to clipboard.", timeout=2.0)
+        except Exception as exc:
+            _logger.exception("Failed to copy error logs to clipboard")
+            self.notify(f"Failed to copy errors: {exc}", timeout=3.0)
+
+    @on(Button.Pressed, "#btn-copy-logs")
+    def on_copy_logs_button(self) -> None:
+        self.action_copy_logs()
+
+    @on(Button.Pressed, "#btn-copy-errors")
+    def on_copy_errors_button(self) -> None:
+        self.action_copy_errors()
 
     async def _create_client(self) -> Client:
         conn = self.config.connection

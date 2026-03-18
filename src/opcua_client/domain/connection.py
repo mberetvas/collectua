@@ -22,21 +22,33 @@ class SecurityMode(str, Enum):
 
 
 class AuthPolicy(str, Enum):
+    """
+    OPC UA *security policy* (not user authentication method).
+
+    Note: user authentication is determined separately by credentials (anonymous vs username/password),
+    while this field selects the security policy used for the secure channel.
+    """
+
     NONE = "None"
-    USERNAME = "Username"
-    CERTIFICATE = "Certificate"
+    BASIC128RSA15 = "Basic128Rsa15"
+    BASIC256 = "Basic256"
+    BASIC256SHA256 = "Basic256Sha256"
+    AES128_SHA256_RSAOAEP = "Aes128_Sha256_RsaOaep"
+    AES256_SHA256_RSAPSS = "Aes256_Sha256_RsaPss"
 
     @classmethod
     def from_value(cls, value: str | None) -> "AuthPolicy":
-        if value is None or value.strip() == "":
+        if value is None:
             return cls.NONE
-        normalized = value.strip().lower()
-        if normalized in {"none", "anonymous"}:
+        normalized = value.strip()
+        if not normalized:
             return cls.NONE
-        if normalized in {"username", "usernamepassword"}:
-            return cls.USERNAME
-        if normalized in {"certificate", "x509"}:
-            return cls.CERTIFICATE
+        if normalized.lower() in {"none"}:
+            return cls.NONE
+        for policy in cls:
+            if policy.value.lower() == normalized.lower():
+                return policy
+        # Unknown policy -> treat as None to keep backward compatibility.
         return cls.NONE
 
 
