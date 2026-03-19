@@ -7,7 +7,7 @@ import os
 import socket
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -405,7 +405,6 @@ class OpcuaTuiApp(App[None]):
             log_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(log_dir / "logs.db")
 
-        log_stream = self.query_one("#log-stream")
         self._log_handler = TuiSqliteLogHandler(
             Path(db_path),
             retention_days=self.config.log_retention_days,
@@ -449,29 +448,18 @@ class OpcuaTuiApp(App[None]):
         try:
             from .widgets.log_stream import style_for_level
 
-            # Fetch the most recent rows (descending) to show newest first.
-            self._log_handler.acquire()
-            try:
-                cur = self._log_handler._conn.execute(
-                    "SELECT id, timestamp_utc, levelno, levelname, logger_name, message "
-                    "FROM logs ORDER BY id DESC LIMIT 1000"
-                )
-                rows = cur.fetchall()
-            finally:
-                self._log_handler.release()
+            rows = self._log_handler.fetch_recent(limit=1000)
 
             if rows:
                 log_stream = self.query_one("#log-stream")
                 log_stream.clear()
                 # rows are newest-first; we want newest at top of widget, so iterate reversed.
                 for row in reversed(rows):
-                    row_id, ts, levelno, lvlname, logger_name, msg = row
-                    formatted = f"{ts[:19]} {lvlname} {logger_name}: {msg}"
                     log_stream.add_entry(
-                        Text(formatted, style=style_for_level(levelno)),
-                        levelno=levelno,
+                        Text(row.message, style=style_for_level(row.levelno)),
+                        levelno=row.levelno,
                     )
-                    self._last_log_row_id = row_id
+                    self._last_log_row_id = row.id
         except Exception:
             _logger.exception("Error loading all logs from SQLite")
 

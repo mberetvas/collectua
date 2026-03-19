@@ -205,6 +205,32 @@ class TuiSqliteLogHandler(logging.Handler):
         finally:
             self.release()
 
+    def fetch_recent(self, limit: int = 1000) -> List[SqliteLogRow]:
+        """
+        Fetch the most recent rows ordered descending by id (newest first).
+        """
+        self.acquire()
+        try:
+            cur = self._conn.execute(
+                "SELECT id, timestamp_utc, levelno, levelname, logger_name, message "
+                "FROM logs ORDER BY id DESC LIMIT ?",
+                (limit,),
+            )
+            rows = [
+                SqliteLogRow(
+                    id=row[0],
+                    timestamp_utc=row[1],
+                    levelno=row[2],
+                    levelname=row[3],
+                    logger_name=row[4],
+                    message=row[5],
+                )
+                for row in cur.fetchall()
+            ]
+            return rows
+        finally:
+            self.release()
+
     def close(self) -> None:
         try:
             if getattr(self, "_conn", None) is not None:

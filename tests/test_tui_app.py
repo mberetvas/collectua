@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 from asyncua import ua
@@ -8,6 +9,7 @@ from asyncua import ua
 from opcua_client.domain.alarm import Alarm
 from opcua_client.config.runtime_config import BrowseConfig, CollectConfig, ConnectionConfig, RuntimeConfig
 from opcua_client.tui.app import OpcuaTuiApp
+from opcua_client.tui.widgets.log_stream import SqliteLogRow
 
 
 def test_create_client_normalizes_string_auth_policy(monkeypatch) -> None:
@@ -297,3 +299,62 @@ def test_action_acknowledge_selected_alarm_schedules_ack(monkeypatch) -> None:
 
     assert captured["alarm"] is alarm
     assert notices[0].startswith("Acknowledging Overheat")
+
+
+def test_load_all_logs_uses_fetch_recent_without_reformatting(monkeypatch) -> None:
+    class DummyHandler:
+        def __init__(self, rows: list[SqliteLogRow]) -> None:
+            self.rows = rows
+            self.calls: list[int] = []
+
+        def fetch_recent(self, limit: int = 1000) -> list[SqliteLogRow]:
+            self.calls.append(limit)
+            return self.rows
+
+    class DummyLogStream:
+        def __init__(self) -> None:
+            self.cleared = False
+            self.entries: list[tuple[int, str]] = []
+
+        def clear(self) -> None:
+            self.cleared = True
+
+        def add_entry(self, entry, levelno: int = logging.NOTSET) -> None:
+            self.entries.append((levelno, entry.plain))
+
+    config = RuntimeConfig(
+        command="tui",
+        connection=ConnectionConfig(url="opc.tcp://localhost:50000", timeout=5.0),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+    app = OpcuaTuiApp(config)
+    rows = [
+        SqliteLogRow(
+            id=8,
+            timestamp_utc="2026-03-19T10:10:11+00:00",
+            levelno=logging.ERROR,
+            levelname="ERROR",
+            logger_name="beta",
+            message="2026-03-19T10:10:11 ERROR beta: already formatted two",
+        ),
+        SqliteLogRow(
+            id=7,
+            timestamp_utc="2026-03-19T10:10:10+00:00",
+            levelno=logging.INFO,
+            levelname="INFO",
+            logger_name="alpha",
+            message="2026-03-19T10:10:10 INFO alpha: already formatted one",
+        ),
+    ]
+    handler = DummyHandler(rows)
+    log_stream = DummyLogStream()
+    app._log_handler = handler
+    monkeypatch.setattr(app, "query_one", lambda selector: log_stream)
+
+    app._load_all_logs()
+
+    assert handler.calls == [1000]
+    assert log_stream.cleared
+    assert [text for _, text in log_stream.entries] == [row.message for row in reversed(rows)]
+    assert app._last_log_row_id == rows[0].id

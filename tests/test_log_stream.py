@@ -170,3 +170,26 @@ def test_sqlite_handler_retention_uses_epoch_not_text_order(tmp_path: Path) -> N
     messages = [row.message for row in rows]
     assert not any("old mixed format" in msg for msg in messages)
     assert any("recent no fractional" in msg for msg in messages)
+
+
+def test_sqlite_handler_fetch_recent_returns_newest_with_limit(tmp_path: Path) -> None:
+    db_path = tmp_path / "logs.db"
+    handler = TuiSqliteLogHandler(db_path, retention_days=7)
+
+    for idx in range(3):
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=0,
+            msg=f"message-{idx}",
+            args=(),
+            exc_info=None,
+        )
+        handler.emit(record)
+
+    rows = handler.fetch_recent(limit=2)
+    assert len(rows) == 2
+    assert rows[0].id > rows[1].id
+    assert "message-2" in rows[0].message
+    assert "message-1" in rows[1].message
