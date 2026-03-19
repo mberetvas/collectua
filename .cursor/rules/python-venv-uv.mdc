@@ -1,0 +1,36 @@
+---
+description: Enforce uv/virtual environment usage for Python commands
+alwaysApply: true
+---
+
+# Python Environment Command Policy
+
+- Run Python tooling through `uv` so commands execute in the project environment.
+- If `uv` is not used for a command, activate the virtual environment first.
+- Perform all Python/package-management steps inside the virtual environment.
+
+## Preferred Patterns
+
+```bash
+# Preferred: uv-managed execution
+uv run pytest
+uv run collectua
+uv add textual
+uv sync
+```
+
+```bash
+# Acceptable alternative: activate venv first
+# PowerShell
+.venv\Scripts\Activate.ps1
+pytest
+pip install -e .
+```
+
+## Avoid
+
+```bash
+# Do not run Python/package commands outside venv context
+pytest
+pip install textual
+```

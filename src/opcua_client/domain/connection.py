@@ -90,7 +90,7 @@ class Credentials:
     def is_username_auth(self) -> bool:
         return bool(self.username)
 
-    def is_certificate_auth(self) -> bool:
+    def is_anonymous(self) -> bool:
         return not self.username and not self.password
 
 

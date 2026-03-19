@@ -41,4 +41,11 @@ def test_connection_helpers_and_credentials() -> None:
     assert connection.requires_client_cert() is True
     assert isinstance(connection.credentials, Credentials)
     assert connection.credentials.is_username_auth() is True
+    assert connection.credentials.is_anonymous() is False
     assert connection.auth_policy == AuthPolicy.BASIC256SHA256
+
+
+def test_credentials_anonymous_detection() -> None:
+    anonymous = Credentials()
+    assert anonymous.is_username_auth() is False
+    assert anonymous.is_anonymous() is True

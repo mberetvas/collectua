@@ -575,7 +575,7 @@ class OpcuaTuiApp(App[None]):
             await client.set_security_string(
                 f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}"
             )
-            replacement_server_uri = conn.url
+            replacement_server_uri = ""
             try:
                 endpoints = await client.connect_and_get_server_endpoints()
                 for endpoint in endpoints:
@@ -589,7 +589,8 @@ class OpcuaTuiApp(App[None]):
                         break
             except Exception:
                 pass
-            patch_create_session_server_uri(client, replacement_server_uri)
+            if replacement_server_uri.startswith("urn:"):
+                patch_create_session_server_uri(client, replacement_server_uri)
         return client
 
     async def _run_connection_supervisor(self) -> None:

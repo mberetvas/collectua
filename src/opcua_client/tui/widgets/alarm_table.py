@@ -59,10 +59,18 @@ class AlarmTableWidget(DataTable):
 
     @staticmethod
     def _severity_style(severity: str) -> str:
+        normalized = str(severity).strip().upper()
+        if normalized == "CRITICAL":
+            return "bold #ff5f5f"
+        if normalized in {"HIGH", "MEDIUM"}:
+            return "bold #ffbf4d"
+        if normalized == "LOW":
+            return "bold #8aff80"
+
         try:
-            value = int(severity)
+            value = int(normalized)
         except (TypeError, ValueError):
-            return "#8aff80"
+            return "bold #8aff80"
 
         if value >= 700:
             return "bold #ff5f5f"

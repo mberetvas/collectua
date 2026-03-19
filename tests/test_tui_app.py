@@ -117,6 +117,56 @@ def test_create_client_does_not_patch_create_session(monkeypatch) -> None:
     assert captured["server_uri"] == "urn:OpcPlc:container123"
 
 
+def test_create_client_skips_patch_when_endpoint_discovery_fails(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyClient:
+        def __init__(self, *, url: str, timeout: float) -> None:
+            self.application_uri = ""
+            self.session_timeout = 0
+            self.uaclient = SimpleNamespace(request_timeout=0)
+            self.uaclient.create_session = self._create_session
+
+        async def _create_session(self, parameters) -> str:
+            captured["server_uri"] = parameters.ServerUri
+            return "ok"
+
+        def set_user(self, username: str) -> None:
+            return None
+
+        def set_password(self, password: str) -> None:
+            return None
+
+        async def set_security_string(self, value: str) -> None:
+            return None
+
+        async def connect_and_get_server_endpoints(self) -> list[object]:
+            raise RuntimeError("discovery unavailable")
+
+    monkeypatch.setattr("opcua_client.tui.app.Client", DummyClient)
+    monkeypatch.setattr("opcua_client.tui.app.ensure_client_certificates", lambda: ("client.der", "client.pem"))
+
+    config = RuntimeConfig(
+        command="tui",
+        connection=ConnectionConfig(
+            url="opc.tcp://localhost:50000",
+            timeout=5.0,
+            auth_policy="Aes128_Sha256_RsaOaep",
+            security_mode="Sign",
+        ),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+
+    app = OpcuaTuiApp(config)
+    client = asyncio.run(app._create_client())
+    params = SimpleNamespace(ServerUri="urn:localhost")
+    result = asyncio.run(client.uaclient.create_session(params))
+
+    assert result == "ok"
+    assert captured["server_uri"] == "urn:localhost"
+
+
 def test_create_client_applies_locales(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

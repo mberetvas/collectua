@@ -347,7 +347,7 @@ async def _connect_smoke(config: RuntimeConfig):
                 cert_file, key_file = ensure_client_certificates()
             auth_policy = AuthPolicy.from_value(conn.auth_policy)
             await client.set_security_string(f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}")
-            replacement_server_uri = conn.url
+            replacement_server_uri = ""
             try:
                 endpoints = await client.connect_and_get_server_endpoints()
                 for endpoint in endpoints:
@@ -361,7 +361,8 @@ async def _connect_smoke(config: RuntimeConfig):
                         break
             except Exception:
                 pass
-            patch_create_session_server_uri(client, replacement_server_uri)
+            if replacement_server_uri.startswith("urn:"):
+                patch_create_session_server_uri(client, replacement_server_uri)
 
         await client.connect()
         logger.info("Connected. Negotiated session timeout: %dms", client.session_timeout)
