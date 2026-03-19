@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import cli, profile_loader
+from opcua_client.config import profile_loader
+from opcua_client.interface import cli
 
 
 def test_cli_config_uses_profile_values(
@@ -69,3 +70,43 @@ def test_profile_loader_accepts_server_cert_and_trust_cert(tmp_path: Path, monke
     payload = profile_loader.load_profile("plant")
     assert payload["server_cert"] == "plant.der"
     assert payload["trust_cert"] is True
+
+
+def test_profile_loader_accepts_friendly_name_and_description(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    profiles_dir = tmp_path / "connections"
+    profiles_dir.mkdir()
+    (profiles_dir / "plant.yaml").write_text(
+        "url: opc.tcp://plant:4840\n"
+        "timeout: 12.5\n"
+        "friendly_name: Plant OPC Server\n"
+        "description: Main plant connection profile\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(profile_loader, "profile_search_dirs", lambda: [profiles_dir])
+
+    payload = profile_loader.load_profile("plant")
+    assert payload["friendly_name"] == "Plant OPC Server"
+    assert payload["description"] == "Main plant connection profile"
+
+
+def test_cli_list_profiles_shows_friendly_name_and_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    profiles_dir = tmp_path / "connections"
+    profiles_dir.mkdir()
+    (profiles_dir / "plant.yaml").write_text(
+        "url: opc.tcp://plant:4840\n"
+        "timeout: 12.5\n"
+        "friendly_name: Plant OPC Server\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(profile_loader, "profile_search_dirs", lambda: [profiles_dir])
+
+    rc = cli.main(["list-profiles"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "Plant OPC Server" in out
+    assert "opc.tcp://plant:4840" in out

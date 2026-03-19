@@ -7,7 +7,7 @@ import os
 import socket
 
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -19,18 +19,37 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    Static,
+    TabbedContent,
+    TabPane,
+    Button,
+)
 
-from opcua_client.runtime_config import RuntimeConfig
-from opcua_client.cert_paths import ensure_client_certificates
-from opcua_client.condition_refresh import condition_refresh_with_retry
-from opcua_client.collector import CSV_HEADERS, ActiveAlarm, subscribe as collector_subscribe
-from opcua_client.env_defaults import get_formatted_str
+from opcua_client.domain.alarm import Alarm
+from opcua_client.domain.connection import AuthPolicy
+from opcua_client.config.app_paths import collectua_logs_dir, collectua_tui_dir
+from opcua_client.config.env_defaults import get_formatted_str
+from opcua_client.config.runtime_config import RuntimeConfig
+from opcua_client.infrastructure.asyncua_compat import patch_create_session_server_uri
+from opcua_client.ops.condition_refresh import condition_refresh_with_retry
+from opcua_client.ops.collector import (
+    CSV_HEADERS,
+    OverloadRecoveryMonitor,
+    acknowledge_alarm,
+    apply_session_locales,
+    subscribe as collector_subscribe,
+)
+from opcua_client.security.cert_paths import ensure_client_certificates
+from opcua_client.infrastructure.asyncua_adapter import event_to_alarm
 
 from .widgets.alarm_table import AlarmTableWidget
 from .widgets.config_panel import ConfigPanel
 from .widgets.connection_status import ConnectionStatusWidget
-from .widgets.log_stream import TuiLogHandler
+from .widgets.log_stream import TuiSqliteLogHandler
 from .widgets.node_info_panel import NodeInfoPanelWidget
 from .widgets.node_tree import NodeTreeWidget
 
@@ -41,7 +60,10 @@ RETRO_RED = "#ff5f5f"
 
 
 class HelpScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "dismiss", "Close"), Binding("enter", "dismiss", "Close")]
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("enter", "dismiss", "Close"),
+    ]
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -50,19 +72,23 @@ class HelpScreen(ModalScreen[None]):
                     "[b]OPC UA TUI Help[/b]",
                     "",
                     "Tab: Focus next panel",
-                    "Ctrl+Space: Toggle node multi-selection",
+                    "s: Toggle node multi-selection",
                     "Esc: Clear node multi-selection",
-                    "Ctrl+Shift+C: Copy selected Node IDs",
+                    "c: Copy selected Node IDs",
+                    "a: Acknowledge selected alarm",
+                    "l: Copy all logs",
+                    "e: Copy error logs",
                     "↑/↓: Previous/next sibling node (when Node Tree is focused)",
                     "→: Expand node or focus first child",
                     "←: Collapse node or focus parent",
-                    "F6: Toggle Alarms / Node Info tab",
-                    "F1: Help",
-                    "F5: Reconnect",
-                    "F9: Toggle config panel",
-                    "F10 / q: Quit",
+                    "t: Toggle Alarms / Node Info tab",
+                    "?: Help",
+                    "r: Reconnect",
+                    "p: Toggle config panel",
+                    "v: Toggle Logs tab",
+                    "q: Quit",
                     "",
-                    "This dashboard is read-only and streams alarms/events in real-time.",
+                    "This dashboard streams alarms/events in real-time and supports alarm acknowledgment.",
                     "Press ESC or Enter to close.",
                 ]
             ),
@@ -74,7 +100,10 @@ class HelpScreen(ModalScreen[None]):
 
 
 class StartupSplashScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "dismiss", "Skip"), Binding("enter", "dismiss", "Skip")]
+    BINDINGS = [
+        Binding("escape", "dismiss", "Skip"),
+        Binding("enter", "dismiss", "Skip"),
+    ]
 
     def __init__(self, ascii_art_path: Path) -> None:
         super().__init__()
@@ -120,20 +149,44 @@ class StartupSplashScreen(ModalScreen[None]):
             await asyncio.sleep(0.08)
 
         splash.update(
-            Text("\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]), style=f"bold {RETRO_GREEN}")
+            Text(
+                "\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]),
+                style=f"bold {RETRO_GREEN}",
+            )
         )
         await asyncio.sleep(0.65)
         self.dismiss(None)
 
 
 class AlarmRow(Message):
-    def __init__(self, row: dict[str, str]) -> None:
+    def __init__(self, alarm: Alarm) -> None:
         super().__init__()
-        self.row = row
+        self.alarm = alarm
+        # Compatibility for existing tests/widgets expecting a row dict.
+        self.row = {
+            "timestamp_utc": alarm.timestamp_utc.isoformat(),
+            "event_type": alarm.event_type,
+            "source_name": alarm.source_name,
+            "message": alarm.message,
+            "severity": alarm.severity.value,
+            "condition_name": alarm.condition_name,
+            "event_id": alarm.event_id,
+            "condition_id": str(alarm.alarm_id),
+            "retain": "" if alarm.retain is None else str(bool(alarm.retain)),
+            "active_state": ""
+            if alarm.active_state is None
+            else str(bool(alarm.active_state)),
+            "acked_state": ""
+            if alarm.acked_state is None
+            else str(bool(alarm.acked_state)),
+            "raw": alarm.raw,
+        }
 
 
 class ConnectionState(Message):
-    def __init__(self, connected: bool, reconnecting: bool = False, error: str = "") -> None:
+    def __init__(
+        self, connected: bool, reconnecting: bool = False, error: str = ""
+    ) -> None:
         super().__init__()
         self.connected = connected
         self.reconnecting = reconnecting
@@ -157,7 +210,8 @@ class TuiAlarmHandler:
         self.csv_path = csv_path
         self.app = app
         self._ensure_csv_header()
-        self._active_alarms: Dict[str, ActiveAlarm] = {}
+        self._active_alarms: Dict[str, Alarm] = {}
+        self._overload_monitor = OverloadRecoveryMonitor(_logger)
 
     def _ensure_csv_header(self) -> None:
         if not os.path.exists(self.csv_path):
@@ -204,16 +258,19 @@ class TuiAlarmHandler:
         else:
             retain_normalized = bool(retain) if retain is not None else None
 
-        active_alarm = ActiveAlarm(
-            condition_id=condition_id,
+        alarm = Alarm.from_values(
+            alarm_id=str(condition_id),
             condition_name=str(row.get("condition_name", "")),
             source_name=str(row.get("source_name", "")),
             message=str(row.get("message", "")),
-            severity=str(row.get("severity", "")),
+            severity=row.get("severity"),
             timestamp_utc=str(row.get("timestamp_utc", "")),
             retain=retain_normalized,
             active_state=bool(active_state) if active_state is not None else None,
             acked_state=bool(acked_state) if acked_state is not None else None,
+            event_type=str(row.get("event_type", "")),
+            event_id=str(row.get("event_id", "")),
+            event_id_bytes=row.get("event_id_bytes"),
             raw=str(row.get("raw", "")),
         )
 
@@ -224,43 +281,53 @@ class TuiAlarmHandler:
             return
 
         _logger.debug("Upserting active alarm for ConditionId=%s", condition_id)
-        self._active_alarms[condition_id] = active_alarm
+        self._active_alarms[condition_id] = alarm
 
-    def get_active_alarms(self) -> Mapping[str, ActiveAlarm]:
+    def get_active_alarms(self) -> Mapping[str, Alarm]:
         """Return a read-only view of the currently active alarms."""
         return dict(self._active_alarms)
 
     def event_notification(self, event) -> None:
         try:
             _logger.debug("RAW EVENT RECEIVED: %s", event)
+            alarm = event_to_alarm(event)
             row = {
-                "timestamp_utc": str(getattr(event, "Time", datetime.now(timezone.utc))),
-                "event_type": str(getattr(event, "EventType", "")),
-                "source_name": str(getattr(event, "SourceName", "")),
-                "message": str(getattr(event, "Message", "")),
-                "severity": str(getattr(event, "Severity", "")),
-                "condition_name": str(getattr(event, "ConditionName", "")),
-                "event_id": str(getattr(event, "EventId", "")),
-                "condition_id": self._condition_id_from_event(event),
-                "retain": getattr(event, "Retain", None),
-                "active_state": self._bool_from_state(getattr(event, "ActiveState", None)),
-                "acked_state": self._bool_from_state(getattr(event, "AckedState", None)),
-                "raw": str(event),
+                "timestamp_utc": alarm.timestamp_utc.isoformat(),
+                "event_type": alarm.event_type,
+                "source_name": alarm.source_name,
+                "message": alarm.message,
+                "severity": alarm.severity.value,
+                "condition_name": alarm.condition_name,
+                "event_id": alarm.event_id,
+                "condition_id": str(alarm.alarm_id),
+                "retain": alarm.retain,
+                "active_state": alarm.active_state,
+                "acked_state": alarm.acked_state,
+                "raw": alarm.raw,
             }
 
-            self._update_active_alarms(row)
+            self._update_active_alarms({**row, "event_id_bytes": alarm.event_id_bytes})
 
             with open(self.csv_path, "a", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
                 writer.writerow(row)
 
-            self.app.post_message(AlarmRow(row))
+            self.app.post_message(AlarmRow(alarm))
 
         except Exception:
             _logger.exception("Failed to process event")
 
     def status_change_notification(self, status) -> None:
         _logger.warning("Subscription status changed: %s", status)
+
+    def configure_overloads_monitor(self, *, node_id: str, refresh_callback) -> None:
+        self._overload_monitor.configure(
+            node_id=node_id, refresh_callback=refresh_callback
+        )
+
+    def datachange_notification(self, node, val, data) -> None:
+        _ = data
+        self._overload_monitor.handle_datachange(node, val)
 
 
 class OpcuaTuiApp(App[None]):
@@ -269,16 +336,17 @@ class OpcuaTuiApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("f10", "quit", "Quit"),
-        Binding("f5", "reconnect", "Reconnect"),
-        Binding("f6", "toggle_main_tab", "Toggle Main Tab"),
-        Binding("shift+f6", "show_alarm_tab", "Show Alarms"),
-        Binding("ctrl+space", "toggle_node_selection", "Toggle Node Selection"),
+        Binding("r", "reconnect", "Reconnect"),
+        Binding("t", "toggle_main_tab", "Toggle Main Tab"),
+        Binding("s", "toggle_node_selection", "Toggle Node Selection"),
         Binding("escape", "clear_node_selection", "Clear Node Selection"),
-        Binding("ctrl+shift+c", "copy_selected_node_id", "Copy Node IDs"),
-        Binding("f1", "help", "Help"),
-        Binding("f8", "toggle_logs", "Toggle Logs"),
-        Binding("f9", "toggle_config", "Toggle Config"),
+        Binding("c", "copy_selected_node_id", "Copy Node IDs"),
+        Binding("a", "acknowledge_selected_alarm", "Ack Alarm"),
+        Binding("l", "copy_logs", "Copy Logs"),
+        Binding("e", "copy_errors", "Copy Errors"),
+        Binding("?", "help", "Help"),
+        Binding("v", "toggle_logs", "Toggle Logs"),
+        Binding("p", "toggle_config", "Toggle Config"),
         Binding("/", "focus_search", "Search"),
         Binding("tab", "focus_next_panel", "Next Panel"),
         Binding("right", "expand_or_focus_right", "Expand/Right", show=False),
@@ -296,14 +364,14 @@ class OpcuaTuiApp(App[None]):
         self._runner_task: asyncio.Task | None = None
         self._node_value_task: asyncio.Task | None = None
         self._shutdown_requested = False
-        self._log_handler: TuiLogHandler | None = None
+        self._log_handler: TuiSqliteLogHandler | None = None
+        self._last_log_row_id: int = 0
         self._selected_node: dict[str, Any] | None = None
         self._pending_focus_first_child_node_ids: set[str] = set()
-        # 0 = default layout, 1 = right-column logs, 2 = full-screen logs
-        self._log_mode: int = 0
         self._search_query: str = ""
         self._search_results: list[Any] = []
         self._search_index: int = 0
+        self._alarm_tasks: set[asyncio.Task[Any]] = set()
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -319,16 +387,39 @@ class OpcuaTuiApp(App[None]):
                         yield AlarmTableWidget(id="alarm-table")
                     with TabPane("Node Info", id="tab-node-info"):
                         yield NodeInfoPanelWidget(id="node-info-content")
-                from .widgets.log_stream import LogStreamWidget
+                    with TabPane("Logs", id="tab-logs"):
+                        from .widgets.log_stream import LogStreamWidget
 
-                yield LogStreamWidget(id="log-stream")
+                        with Vertical(id="log-panel"):
+                            with Horizontal(id="log-actions"):
+                                yield Button(
+                                    "Refresh logs",
+                                    id="btn-refresh-logs",
+                                    variant="primary",
+                                )
+                                yield Button(
+                                    "Copy Logs", id="btn-copy-logs", variant="default"
+                                )
+                                yield Button(
+                                    "Copy Errors", id="btn-copy-errors", variant="error"
+                                )
+                            yield LogStreamWidget(id="log-stream")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.query_one(ConfigPanel).set_config(asdict(self.config))
 
-        log_stream = self.query_one("#log-stream")
-        self._log_handler = TuiLogHandler(log_stream)
+        # Determine log DB path: use explicit config or default to user app data dir.
+        db_path = self.config.log_db_path
+        if not db_path:
+            tui_dir = collectua_tui_dir()
+            tui_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(tui_dir / "logs.db")
+
+        self._log_handler = TuiSqliteLogHandler(
+            Path(db_path),
+            retention_days=self.config.log_retention_days,
+        )
         root_logger = logging.getLogger()
 
         # When launched via the CLI, logging is configured with a console StreamHandler that
@@ -336,11 +427,15 @@ class OpcuaTuiApp(App[None]):
         # in-app log panel, not in the terminal itself, so we remove any existing console
         # stream handlers and rely on the TUI handler (plus any file handlers) instead.
         for handler in list(root_logger.handlers):
-            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, logging.FileHandler
+            ):
                 root_logger.removeHandler(handler)
 
         root_logger.addHandler(self._log_handler)
-        root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
+        root_logger.setLevel(
+            getattr(logging, self.config.log_level.upper(), logging.INFO)
+        )
 
         # Do not block the Mount message handler on splash dismissal.
         # Textual screen lifecycle callbacks are message-pump driven, so startup
@@ -355,67 +450,92 @@ class OpcuaTuiApp(App[None]):
             return
         self._runner_task = asyncio.create_task(self._run_connection_supervisor())
 
-    def _apply_log_mode(self) -> None:
-        log_stream = self.query_one("#log-stream")
-        config_panel = self.query_one(ConfigPanel)
-        tabbed = self.query_one("#tabbed-panel", TabbedContent)
-        header = self.query_one(Header)
-        status = self.query_one("#connection-status", ConnectionStatusWidget)
-        left_column = self.query_one("#left-column")
-        right_column = self.query_one("#right-column")
-        footer = self.query_one(Footer)
-
-        if self._log_mode == 0:
-            # Default: full dashboard layout.
-            header.display = True
-            status.display = True
-            left_column.display = True
-            right_column.display = True
-            footer.display = True
-
-            log_stream.display = True
-            log_stream.styles.height = None  # defer to CSS (fixed height)
-            right_column.styles.width = None
-
-            tabbed.display = True
-            config_panel.display = True
-        elif self._log_mode == 1:
-            # Full-width/right-column logs, hide config panel.
-            header.display = True
-            status.display = True
-            left_column.display = True
-            right_column.display = True
-            footer.display = True
-
-            log_stream.display = True
-            log_stream.styles.height = "1fr"
-            right_column.styles.width = None
-
-            tabbed.display = False
-            config_panel.display = False
-        else:
-            # Full-screen logs: hide main content except connection status + footer.
-            header.display = False
-            status.display = True
-            left_column.display = False
-            footer.display = True
-
-            right_column.display = True
-            right_column.styles.width = "1fr"
-
-            log_stream.display = True
-            log_stream.styles.height = "1fr"
-
-            tabbed.display = False
-            config_panel.display = False
-
     def action_toggle_logs(self) -> None:
-        self._log_mode = (self._log_mode + 1) % 3
-        self._apply_log_mode()
+        tabbed = self.query_one("#tabbed-panel", TabbedContent)
+        tabbed.active = "tab-logs" if tabbed.active != "tab-logs" else "tab-alarms"
+
+    def _load_all_logs(self) -> None:
+        """Load all logs from SQLite into the widget (used when switching to Logs tab)."""
+        if not self._log_handler:
+            return
+
+        try:
+            from .widgets.log_stream import style_for_level
+
+            rows = self._log_handler.fetch_recent(limit=1000)
+
+            if rows:
+                log_stream = self.query_one("#log-stream")
+                log_stream.clear()
+                # rows are newest-first; we want newest at top of widget, so iterate reversed.
+                for row in reversed(rows):
+                    log_stream.add_entry(
+                        Text(row.message, style=style_for_level(row.levelno)),
+                        levelno=row.levelno,
+                    )
+                    self._last_log_row_id = row.id
+        except Exception:
+            _logger.exception("Error loading all logs from SQLite")
+
+    def _copy_to_clipboard_robust(self, text: str) -> None:
+        """Try Textual clipboard first; fall back to pyperclip."""
+        try:
+            self.copy_to_clipboard(text)
+        except Exception:
+            import pyperclip
+
+            pyperclip.copy(text)
+
+    def action_copy_logs(self) -> None:
+        try:
+            log_stream = self.query_one("#log-stream")
+            export_text = getattr(log_stream, "export_text", None)
+            text = export_text() if callable(export_text) else ""
+
+            if not text.strip():
+                self.notify("No logs to copy yet.", timeout=2.0)
+                return
+
+            self._copy_to_clipboard_robust(text)
+            self.notify("Copied logs to clipboard.", timeout=2.0)
+
+        except Exception as exc:
+            _logger.exception("Failed to copy logs to clipboard")
+            self.notify(f"Failed to copy logs: {exc}", timeout=3.0)
+
+    def action_copy_errors(self) -> None:
+        try:
+            log_stream = self.query_one("#log-stream")
+            export_text = getattr(log_stream, "export_text", None)
+            text = export_text(min_level=logging.ERROR) if callable(export_text) else ""
+
+            if not text.strip():
+                self.notify("No errors to copy yet.", timeout=2.0)
+                return
+
+            self._copy_to_clipboard_robust(text)
+            self.notify("Copied error logs to clipboard.", timeout=2.0)
+        except Exception as exc:
+            _logger.exception("Failed to copy error logs to clipboard")
+            self.notify(f"Failed to copy errors: {exc}", timeout=3.0)
+
+    @on(Button.Pressed, "#btn-copy-logs")
+    def on_copy_logs_button(self) -> None:
+        self.action_copy_logs()
+
+    @on(Button.Pressed, "#btn-copy-errors")
+    def on_copy_errors_button(self) -> None:
+        self.action_copy_errors()
+
+    @on(Button.Pressed, "#btn-refresh-logs")
+    def on_refresh_logs_button(self) -> None:
+        self._load_all_logs()
 
     async def _create_client(self) -> Client:
         conn = self.config.connection
+        auth_policy = AuthPolicy.from_value(conn.auth_policy)
         client = Client(url=conn.url, timeout=conn.timeout)
+        apply_session_locales(client, conn.locales)
         client.application_uri = get_formatted_str(
             "OPCUA_CLIENT_APP_URI_TEMPLATE",
             "urn:{hostname}:foobar:myclient",
@@ -435,40 +555,53 @@ class OpcuaTuiApp(App[None]):
                 cert_file, key_file = conn.cert_file, conn.key_file
             else:
                 cert_file, key_file = ensure_client_certificates()
-            await client.set_security_string(f"{conn.auth_policy},{conn.security_mode},{cert_file},{key_file}")
-            selected_endpoint_app_uri = ""
+            await client.set_security_string(
+                f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}"
+            )
+            replacement_server_uri = ""
             try:
-                eps = await client.connect_and_get_server_endpoints()
-                for ep in eps:
-                    policy_short = (getattr(ep, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
-                    mode_name = getattr(getattr(ep, "SecurityMode", None), "name", "")
+                endpoints = await client.connect_and_get_server_endpoints()
+                for endpoint in endpoints:
+                    policy_short = (
+                        getattr(endpoint, "SecurityPolicyUri", "") or ""
+                    ).rsplit("#", 1)[-1] or "None"
+                    mode_name = getattr(
+                        getattr(endpoint, "SecurityMode", None), "name", ""
+                    )
                     normalized_mode = "None_" if mode_name == "None" else mode_name
-                    if policy_short == conn.auth_policy and normalized_mode == conn.security_mode:
-                        selected_endpoint_app_uri = str(
-                            getattr(getattr(ep, "Server", None), "ApplicationUri", "") or ""
+                    if (
+                        policy_short == auth_policy.value
+                        and normalized_mode == conn.security_mode
+                    ):
+                        advertised_uri = str(
+                            getattr(
+                                getattr(endpoint, "Server", None), "ApplicationUri", ""
+                            )
+                            or ""
                         )
+                        if advertised_uri:
+                            replacement_server_uri = advertised_uri
                         break
             except Exception:
                 pass
-            if selected_endpoint_app_uri:
-                original_create_session = client.uaclient.create_session
-
-                async def _patched_create_session(parameters):
-                    parameters.ServerUri = selected_endpoint_app_uri
-                    return await original_create_session(parameters)
-
-                client.uaclient.create_session = _patched_create_session
-
+            if replacement_server_uri.startswith("urn:"):
+                patch_create_session_server_uri(client, replacement_server_uri)
         return client
 
     async def _run_connection_supervisor(self) -> None:
         reconnect_delay = self.config.collect.reconnect_delay_sec
         while not self._shutdown_requested:
             try:
-                self.post_message(ConnectionState(connected=False, reconnecting=True, error="Connecting..."))
+                self.post_message(
+                    ConnectionState(
+                        connected=False, reconnecting=True, error="Connecting..."
+                    )
+                )
                 self._client = await self._create_client()
                 await self._client.connect()
-                self.post_message(ConnectionState(connected=True, reconnecting=False, error=""))
+                self.post_message(
+                    ConnectionState(connected=True, reconnecting=False, error="")
+                )
                 _logger.info("Connected to %s", self.config.connection.url)
 
                 await self._load_node_tree()
@@ -477,7 +610,9 @@ class OpcuaTuiApp(App[None]):
                 break
             except Exception as exc:
                 _logger.exception("Connection loop error")
-                self.post_message(ConnectionState(connected=False, reconnecting=True, error=str(exc)))
+                self.post_message(
+                    ConnectionState(connected=False, reconnecting=True, error=str(exc))
+                )
                 await asyncio.sleep(reconnect_delay)
             finally:
                 await self._cleanup_client()
@@ -508,6 +643,10 @@ class OpcuaTuiApp(App[None]):
             pass
         finally:
             self._client = None
+
+        for task in list(self._alarm_tasks):
+            task.cancel()
+        self._alarm_tasks.clear()
 
     async def _load_node_tree(self) -> None:
         if not self._client:
@@ -552,9 +691,13 @@ class OpcuaTuiApp(App[None]):
 
         if depth < max_depth and node_class == ua.NodeClass.Object:
             for child in await node.get_children(
-                nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
+                nodeclassmask=ua.NodeClass.Object
+                | ua.NodeClass.Variable
+                | ua.NodeClass.Method
             ):
-                child_tree = await self._browse_nodes(child, depth + 1, max_depth, target_namespaces)
+                child_tree = await self._browse_nodes(
+                    child, depth + 1, max_depth, target_namespaces
+                )
                 if child_tree:
                     children.append(child_tree)
 
@@ -573,7 +716,11 @@ class OpcuaTuiApp(App[None]):
             except ua.UaError:
                 var_type = None
 
-        expandable = node_class == ua.NodeClass.Object and depth < self.config.browse.max_depth and depth >= max_depth
+        expandable = (
+            node_class == ua.NodeClass.Object
+            and depth < self.config.browse.max_depth
+            and depth >= max_depth
+        )
 
         return {
             "id": node.nodeid.to_string(),
@@ -586,7 +733,9 @@ class OpcuaTuiApp(App[None]):
             "expandable": expandable,
         }
 
-    async def _fetch_child_tree_data(self, node_data: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _fetch_child_tree_data(
+        self, node_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         if not self._client:
             return []
 
@@ -622,7 +771,11 @@ class OpcuaTuiApp(App[None]):
         except Exception as exc:
             _logger.exception("Failed to lazy-load node children")
             tree_widget.remove_placeholder(tree_node)
-            tree_node.add(f"⚠ Failed to load: {exc}", data={"_load_error": True}, allow_expand=False)
+            tree_node.add(
+                f"⚠ Failed to load: {exc}",
+                data={"_load_error": True},
+                allow_expand=False,
+            )
             if node_id:
                 self._pending_focus_first_child_node_ids.discard(node_id)
             return
@@ -655,6 +808,7 @@ class OpcuaTuiApp(App[None]):
             # guard so we disable the built-in refresh in the shared helper.
             enable_condition_refresh=False,
             is_active=None,
+            overloads_node_id=self.config.connection.overloads_node_id or None,
         )
 
         subscription = self._subscription
@@ -667,7 +821,8 @@ class OpcuaTuiApp(App[None]):
                 self._shutdown_requested
                 or self._client is not client
                 or self._subscription is not subscription
-                or getattr(self._subscription, "subscription_id", None) != subscription_id
+                or getattr(self._subscription, "subscription_id", None)
+                != subscription_id
             ):
                 _logger.info(
                     "Skipping ConditionRefresh for SubscriptionId=%s: client or subscription no longer active",
@@ -683,7 +838,8 @@ class OpcuaTuiApp(App[None]):
                     not self._shutdown_requested
                     and self._client is client
                     and self._subscription is subscription
-                    and getattr(self._subscription, "subscription_id", None) == subscription_id
+                    and getattr(self._subscription, "subscription_id", None)
+                    == subscription_id
                 ),
             )
 
@@ -693,7 +849,7 @@ class OpcuaTuiApp(App[None]):
             await asyncio.sleep(1)
 
     def on_alarm_row(self, message: AlarmRow) -> None:
-        self.query_one(AlarmTableWidget).add_event(message.row)
+        self.query_one(AlarmTableWidget).add_event(message.alarm)
 
     def on_connection_state(self, message: ConnectionState) -> None:
         status = self.query_one(ConnectionStatusWidget)
@@ -716,10 +872,14 @@ class OpcuaTuiApp(App[None]):
             node_class = str(node_data.get("cls", ""))
 
             if node_class == "Variable":
-                panel.display_node(node_data, value_text=f"[{RETRO_AMBER}]Loading...[/{RETRO_AMBER}]")
+                panel.display_node(
+                    node_data, value_text=f"[{RETRO_AMBER}]Loading...[/{RETRO_AMBER}]"
+                )
                 if self._node_value_task and not self._node_value_task.done():
                     self._node_value_task.cancel()
-                self._node_value_task = asyncio.create_task(self._read_selected_node_value(node_data))
+                self._node_value_task = asyncio.create_task(
+                    self._read_selected_node_value(node_data)
+                )
             else:
                 panel.display_node(
                     node_data,
@@ -741,10 +901,30 @@ class OpcuaTuiApp(App[None]):
                 return
 
             node = self._client.get_node(node_id)
-            value = await node.read_value()
+            data_value = await node.read_data_value()
+            status_code = getattr(data_value, "StatusCode", ua.StatusCode())
+            status_value = getattr(status_code, "value", 0)
+            status_name = getattr(status_code, "name", f"0x{status_value:08x}")
+            value = getattr(getattr(data_value, "Value", None), "Value", None)
 
             # Skip stale updates if user has selected a different node meanwhile.
             if not self._selected_node or self._selected_node.get("id") != node_id:
+                return
+
+            if status_value == ua.StatusCodes.GoodOverload:
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text=f"[bold {RETRO_AMBER}][PLC Busy: GoodOverload][/bold {RETRO_AMBER}]",
+                    value_status=f"{status_name} at {datetime.now().strftime('%H:%M:%S')}",
+                )
+                return
+
+            if hasattr(status_code, "is_good") and not status_code.is_good():
+                self.query_one(NodeInfoPanelWidget).display_node(
+                    node_data,
+                    value_text=f"[{RETRO_RED}]Read failed[/{RETRO_RED}]",
+                    value_status=status_name,
+                )
                 return
 
             value_rendered = str(value)
@@ -766,6 +946,44 @@ class OpcuaTuiApp(App[None]):
                     value_text=f"[{RETRO_RED}]Read failed[/{RETRO_RED}]",
                     value_status=str(exc),
                 )
+
+    def action_acknowledge_selected_alarm(self) -> None:
+        alarm_table = self.query_one(AlarmTableWidget)
+        if not alarm_table.has_focus:
+            return
+
+        alarm = alarm_table.get_selected_alarm()
+        if alarm is None:
+            self.notify("Select an alarm first.", timeout=2.0)
+            return
+        if self._client is None:
+            self.notify("Not connected to an OPC UA server.", timeout=2.0)
+            return
+        if not alarm.event_id_bytes:
+            self.notify("Selected alarm has no EventId to acknowledge.", timeout=2.5)
+            return
+
+        self.notify(f"Acknowledging {alarm.condition_name}...", timeout=1.5)
+        task = asyncio.create_task(self._acknowledge_alarm_task(alarm))
+        self._alarm_tasks.add(task)
+        task.add_done_callback(self._alarm_tasks.discard)
+
+    async def _acknowledge_alarm_task(self, alarm: Alarm) -> None:
+        client = self._client
+        if client is None:
+            return
+        try:
+            await acknowledge_alarm(
+                client,
+                condition_id=str(alarm.alarm_id),
+                event_id=alarm.event_id_bytes,
+            )
+        except Exception as exc:
+            _logger.exception("Failed to acknowledge alarm %s", alarm.alarm_id)
+            self.notify(f"Acknowledge failed: {exc}", timeout=3.0)
+            return
+
+        self.notify(f"Acknowledged {alarm.condition_name}.", timeout=2.0)
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
@@ -835,7 +1053,9 @@ class OpcuaTuiApp(App[None]):
         self._copy_node_id_to_clipboard([node_id] if node_id else [])
 
     @on(NodeInfoPanelWidget.CopyNodeIdRequested)
-    def on_node_info_copy_requested(self, message: NodeInfoPanelWidget.CopyNodeIdRequested) -> None:
+    def on_node_info_copy_requested(
+        self, message: NodeInfoPanelWidget.CopyNodeIdRequested
+    ) -> None:
         self.action_copy_selected_node_id()
 
     async def action_reconnect(self) -> None:
@@ -949,28 +1169,38 @@ class OpcuaTuiApp(App[None]):
             _search_recursive(tree.root)
         else:
             if self._search_results:
-                self._search_index = (self._search_index + 1) % len(self._search_results)
+                self._search_index = (self._search_index + 1) % len(
+                    self._search_results
+                )
 
         if self._search_results:
             target_node = self._search_results[self._search_index]
 
             parent = getattr(target_node, "parent", None)
             while parent is not None:
-                if getattr(parent, "allow_expand", False) and not getattr(parent, "is_expanded", False):
+                if getattr(parent, "allow_expand", False) and not getattr(
+                    parent, "is_expanded", False
+                ):
                     parent.expand()
                 parent = getattr(parent, "parent", None)
 
             tree.focus_node(target_node)
-            event.control.border_title = f"Matches ({self._search_index + 1}/{len(self._search_results)})"
+            event.control.border_title = (
+                f"Matches ({self._search_index + 1}/{len(self._search_results)})"
+            )
         else:
             event.control.border_title = "No matches"
 
     def action_toggle_main_tab(self) -> None:
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
-        tabbed.active = "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
+        tabbed.active = (
+            "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
+        )
 
-    def action_show_alarm_tab(self) -> None:
-        self.query_one("#tabbed-panel", TabbedContent).active = "tab-alarms"
+    @on(TabbedContent.TabActivated, "#tabbed-panel")
+    def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        # Tab activation handler - log refresh is now handled manually via the refresh button.
+        pass
 
     async def action_quit(self) -> None:
         self._shutdown_requested = True
@@ -984,4 +1214,5 @@ class OpcuaTuiApp(App[None]):
         await self._cleanup_client()
         if self._log_handler:
             logging.getLogger().removeHandler(self._log_handler)
+            self._log_handler.close()
         self.exit()

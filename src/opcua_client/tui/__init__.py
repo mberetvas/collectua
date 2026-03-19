@@ -1,10 +1,11 @@
 import argparse
 import sys
 
-from opcua_client import browse, collector
-from opcua_client.env_defaults import get_int_list, get_str
-from opcua_client.profile_loader import list_profiles, load_profile
-from opcua_client.runtime_config import RuntimeConfig
+from opcua_client.config.app_paths import collectua_connections_dir, collectua_logs_dir
+from opcua_client.config.env_defaults import get_int_list, get_str
+from opcua_client.config.profile_loader import list_profiles, load_profile
+from opcua_client.config.runtime_config import RuntimeConfig
+from opcua_client.ops import browse, collector
 
 from .app import OpcuaTuiApp
 
@@ -28,14 +29,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--debug-log-dir",
-        default=get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"),
+        default=get_str("OPCUA_DEBUG_LOG_DIR", str(collectua_logs_dir())),
         help="Directory for debug log files",
     )
 
     parser.add_argument(
         "--connection-profile",
         default=None,
-        help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+        help=f"Connection profile name from {collectua_connections_dir()}/",
     )
     parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
@@ -61,6 +62,17 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=argparse.SUPPRESS,
         help="Mark the server certificate as trusted for this connection (skips interactive trust prompt)",
+    )
+    parser.add_argument(
+        "--locales",
+        nargs="*",
+        default=argparse.SUPPRESS,
+        help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
+    )
+    parser.add_argument(
+        "--overloads-node-id",
+        default=argparse.SUPPRESS,
+        help="Optional NodeId for the Siemens Overloads state monitor",
     )
 
     parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
@@ -95,7 +107,22 @@ def _build_parser() -> argparse.ArgumentParser:
 def _choose_profile_name(profiles: list[str]) -> str | None:
     print("Available connection profiles:")
     for idx, name in enumerate(profiles, start=1):
-        print(f"  {idx}. {name}")
+        display = name
+        try:
+            payload = load_profile(name)
+            friendly = str(payload.get("friendly_name", "")).strip()
+            url = str(payload.get("url", "")).strip()
+            if friendly:
+                if url:
+                    display = f"{friendly} ({name}, {url})"
+                else:
+                    display = f"{friendly} ({name})"
+            elif url:
+                display = f"{url} ({name})"
+        except Exception:
+            # Fall back to the raw profile name if loading fails for any reason.
+            display = name
+        print(f"  {idx}. {display}")
     print("Select a profile number (or 'q' to cancel): ", end="", flush=True)
 
     while True:
@@ -119,8 +146,8 @@ def main(argv=None) -> int:
         profiles = list_profiles()
         if not profiles:
             print(
-                "No connection profiles available. Create one in ./connections/ or "
-                "~/.config/opcua-client/connections/, or launch opcua-tui with connection args."
+                f"No connection profiles available. Create one in {collectua_connections_dir()}/, "
+                "or launch opcua-tui with connection args."
             )
             return 2
         selected_profile = _choose_profile_name(profiles)

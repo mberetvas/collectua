@@ -1,5 +1,4 @@
 {
     "editor.cursorBlinking": "expand",
-    "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true
 }

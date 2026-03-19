@@ -22,24 +22,23 @@ Footer {
 }
 
 #main-grid {
-    height: 1fr;
+    height: 100%;
     margin: 0 1 1 1;
 }
 
 #left-column {
     width: 40%;
-    height: 1fr;
+    height: 100%;
 }
 
 #right-column {
     width: 60%;
-    height: 1fr;
+    height: 100%;
 }
 
 #node-tree,
 #config-panel,
-#alarm-table,
-#log-stream {
+#alarm-table {
     border: round #2a7d3e;
     background: #071207;
     padding: 0 1;
@@ -61,9 +60,26 @@ Footer {
     border-title-color: #ffbf4d;
 }
 
-#log-stream {
-    height: 12;
-    border-title-color: #ffbf4d;
+#log-actions {
+    height: 3;
+    align: left middle;
+    padding: 0 1;
+    background: #071207;
+    border: round #2a7d3e;
+    border-bottom: none;
+}
+
+#log-actions Button {
+    min-width: 14;
+    margin-right: 1;
+    background: #081108;
+    color: #8aff80;
+    border: tall #2a7d3e;
+}
+
+#log-actions #btn-copy-errors {
+    color: #ff5f5f;
+    border: tall #ff5f5f;
 }
 
 #node-search {
@@ -168,7 +184,20 @@ Footer {
 }
 
 #tab-alarms,
-#tab-node-info {
+#tab-node-info,
+#tab-logs {
     height: 1fr;
     padding: 0;
+}
+
+#tab-logs #log-panel {
+    height: 1fr;
+    margin-bottom: 0;
+}
+
+#tab-logs #log-stream {
+    height: 1fr;
+    border: round #2a7d3e;
+    background: #071207;
+    padding: 0 1;
 }

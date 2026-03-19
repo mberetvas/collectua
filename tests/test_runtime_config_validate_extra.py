@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from opcua_client.runtime_config import (
+from opcua_client.config.runtime_config import (
     BrowseConfig,
     CollectConfig,
     ConnectionConfig,
@@ -21,7 +21,7 @@ def _make_base_runtime() -> RuntimeConfig:
         browse=browse_cfg,
         collect=collect_cfg,
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
 
@@ -92,7 +92,7 @@ def test_logging_config_dataclasses_shape() -> None:
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="debug",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     # Sanity check: the dataclasses round-trip through as_dict/as_json without errors.

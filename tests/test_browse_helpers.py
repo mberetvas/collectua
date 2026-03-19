@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, List
 
-from opcua_client import browse
+from opcua_client.ops import browse
 
 
 @dataclass

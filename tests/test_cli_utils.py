@@ -8,8 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from opcua_client import cli
-from opcua_client.runtime_config import (
+from opcua_client.config.runtime_config import (
     BrowseConfig,
     CollectConfig,
     ConnectionConfig,
@@ -17,6 +16,7 @@ from opcua_client.runtime_config import (
     LoggingConfig,
     RuntimeConfig,
 )
+from opcua_client.interface import cli
 
 
 def test_short_policy_from_uri_empty_and_plain() -> None:
@@ -59,7 +59,7 @@ def _make_runtime_with_logging(
 ) -> tuple[RuntimeConfig, ConnectionConfig]:
     file_cfg = FileLoggingConfig(
         enabled=file_enabled,
-        path=str(file_path) if file_path is not None else "logs/debug",
+        path=str(file_path) if file_path is not None else ".collectua/logs",
         name_pattern=file_pattern,
     )
     logging_cfg = LoggingConfig(
@@ -78,7 +78,7 @@ def _make_runtime_with_logging(
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode=mode,
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
     return runtime, conn
 
@@ -160,7 +160,7 @@ def test_persist_trust_to_profile_updates_yaml(tmp_path: Path, monkeypatch: pyte
     dummy_loader = DummyLoader({"url": "opc.tcp://server:4840"})
 
     # Monkeypatch opcua_client.profile_loader (imported inside _persist_trust_to_profile)
-    import opcua_client.profile_loader as profile_loader_mod
+    import opcua_client.config.profile_loader as profile_loader_mod
 
     monkeypatch.setattr(profile_loader_mod, "load_profile", dummy_loader.load_profile)
     monkeypatch.setattr(cli, "resolve_profile_path", lambda name: profile_path)
@@ -187,7 +187,7 @@ def test_ensure_server_trust_skips_insecure_mode(monkeypatch: pytest.MonkeyPatch
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     called = False
@@ -219,7 +219,7 @@ def test_ensure_server_trust_user_rejects(monkeypatch: pytest.MonkeyPatch) -> No
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     async def fake_collect(config: RuntimeConfig) -> bytes:
@@ -255,7 +255,7 @@ def test_ensure_server_trust_user_accepts_and_persists(tmp_path: Path, monkeypat
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     async def fake_collect(config: RuntimeConfig) -> bytes:
@@ -344,3 +344,127 @@ def test_connect_smoke_uses_explicit_cert_paths(monkeypatch: pytest.MonkeyPatch)
     asyncio.run(cli._connect_smoke(runtime))
 
     assert created["security_string"] == "Basic256Sha256,Sign,/tmp/from-config.der,/tmp/from-config.pem"
+
+
+def test_connect_smoke_patches_server_uri_from_discovered_application_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyRoot:
+        async def get_children(self) -> list[object]:
+            return []
+
+    class DummyClient:
+        def __init__(self, *, url: str, timeout: float) -> None:
+            self.application_uri = ""
+            self.session_timeout = 0
+            self.uaclient = SimpleNamespace(request_timeout=0)
+            self.uaclient.create_session = self._create_session
+            self.nodes = SimpleNamespace(root=DummyRoot())
+
+        async def _create_session(self, parameters) -> str:
+            captured["server_uri"] = parameters.ServerUri
+            return "ok"
+
+        def set_user(self, username: str) -> None:
+            return None
+
+        def set_password(self, password: str) -> None:
+            return None
+
+        async def set_security_string(self, value: str) -> None:
+            return None
+
+        async def connect_and_get_server_endpoints(self) -> list[object]:
+            return [
+                SimpleNamespace(
+                    SecurityPolicyUri="http://opcfoundation.org/UA/SecurityPolicy#Basic256Sha256",
+                    SecurityMode=SimpleNamespace(name="Sign"),
+                    Server=SimpleNamespace(ApplicationUri="urn:OpcPlc:container123"),
+                )
+            ]
+
+        async def connect(self) -> None:
+            params = SimpleNamespace(ServerUri="urn:localhost")
+            await self.uaclient.create_session(params)
+
+        async def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Client", DummyClient)
+    monkeypatch.setattr(cli, "ensure_client_certificates", lambda: ("client.der", "client.pem"))
+
+    runtime = RuntimeConfig(
+        command="connect",
+        log_level="INFO",
+        connection=ConnectionConfig(
+            url="opc.tcp://server:4840",
+            timeout=5.0,
+            auth_policy="Basic256Sha256",
+            security_mode="Sign",
+        ),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+
+    asyncio.run(cli._connect_smoke(runtime))
+
+    assert captured["server_uri"] == "urn:OpcPlc:container123"
+
+
+def test_connect_smoke_skips_server_uri_patch_when_discovery_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyRoot:
+        async def get_children(self) -> list[object]:
+            return []
+
+    class DummyClient:
+        def __init__(self, *, url: str, timeout: float) -> None:
+            self.application_uri = ""
+            self.session_timeout = 0
+            self.uaclient = SimpleNamespace(request_timeout=0)
+            self.uaclient.create_session = self._create_session
+            self.nodes = SimpleNamespace(root=DummyRoot())
+
+        async def _create_session(self, parameters) -> str:
+            captured["server_uri"] = parameters.ServerUri
+            return "ok"
+
+        def set_user(self, username: str) -> None:
+            return None
+
+        def set_password(self, password: str) -> None:
+            return None
+
+        async def set_security_string(self, value: str) -> None:
+            return None
+
+        async def connect_and_get_server_endpoints(self) -> list[object]:
+            raise RuntimeError("discovery unavailable")
+
+        async def connect(self) -> None:
+            params = SimpleNamespace(ServerUri="urn:localhost")
+            await self.uaclient.create_session(params)
+
+        async def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr(cli, "Client", DummyClient)
+    monkeypatch.setattr(cli, "ensure_client_certificates", lambda: ("client.der", "client.pem"))
+
+    runtime = RuntimeConfig(
+        command="connect",
+        log_level="INFO",
+        connection=ConnectionConfig(
+            url="opc.tcp://server:4840",
+            timeout=5.0,
+            auth_policy="Basic256Sha256",
+            security_mode="Sign",
+        ),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+
+    asyncio.run(cli._connect_smoke(runtime))
+
+    assert captured["server_uri"] == "urn:localhost"
