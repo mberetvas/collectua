@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import Final
 
+from .app_paths import collectua_logs_dir
 from .env_defaults import get_bool, get_float, get_int, get_int_list, get_str, get_str_list
 
 
@@ -14,7 +15,7 @@ class FileLoggingConfig:
     """Per-connection file logging configuration."""
 
     enabled: bool = field(default_factory=lambda: get_bool("OPCUA_LOG_FILE_ENABLED", False))
-    path: str = field(default_factory=lambda: get_str("OPCUA_LOG_FILE_PATH", "logs/debug"))
+    path: str = field(default_factory=lambda: get_str("OPCUA_LOG_FILE_PATH", str(collectua_logs_dir())))
     name_pattern: str = field(
         default_factory=lambda: get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log")
     )
@@ -68,7 +69,7 @@ class RuntimeConfig:
     browse: BrowseConfig = field(default_factory=BrowseConfig)
     collect: CollectConfig = field(default_factory=CollectConfig)
     mode: str = field(default_factory=lambda: get_str("OPCUA_MODE", "prod"))
-    debug_log_dir: str = field(default_factory=lambda: get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"))
+    debug_log_dir: str = field(default_factory=lambda: get_str("OPCUA_DEBUG_LOG_DIR", str(collectua_logs_dir())))
     # SQLite-backed TUI log storage configuration
     log_db_path: str | None = field(default_factory=lambda: get_str("OPCUA_TUI_LOG_DB_PATH", "") or None)
     log_retention_days: int = field(default_factory=lambda: get_int("OPCUA_TUI_LOG_RETENTION_DAYS", 7))
@@ -84,7 +85,7 @@ class RuntimeConfig:
             if isinstance(file_dict, dict):
                 file_config = FileLoggingConfig(
                     enabled=file_dict.get("enabled", get_bool("OPCUA_LOG_FILE_ENABLED", False)),
-                    path=file_dict.get("path", get_str("OPCUA_LOG_FILE_PATH", "logs/debug")),
+                    path=file_dict.get("path", get_str("OPCUA_LOG_FILE_PATH", str(collectua_logs_dir()))),
                     name_pattern=file_dict.get(
                         "name_pattern",
                         get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log"),
@@ -102,7 +103,7 @@ class RuntimeConfig:
             command=getattr(args, "command", ""),
             log_level=getattr(args, "log_level", get_str("OPCUA_LOG_LEVEL", "INFO")),
             mode=getattr(args, "mode", get_str("OPCUA_MODE", "prod")),
-            debug_log_dir=getattr(args, "debug_log_dir", get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug")),
+            debug_log_dir=getattr(args, "debug_log_dir", get_str("OPCUA_DEBUG_LOG_DIR", str(collectua_logs_dir()))),
             connection=ConnectionConfig(
                 url=getattr(args, "url", get_str("OPCUA_URL", "")),
                 timeout=float(getattr(args, "timeout", get_float("OPCUA_TIMEOUT", 30.0))),

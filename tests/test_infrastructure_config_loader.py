@@ -46,7 +46,7 @@ def test_load_connection_from_cli_args() -> None:
         reconnect_delay_sec=5,
         mode="prod",
         log_level="INFO",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
         logging=None,
     )
     connection = load_connection_from_cli_args(args)

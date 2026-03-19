@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Architecture documentation now includes DDD layering guidance**
   - Updated `.planning/codebase/ARCHITECTURE.md` with domain/infrastructure layers and dependency direction rules
   - Updated README project structure to reflect new `domain/` and `infrastructure/` directories
+- **Single-root local storage layout under `~/.collectua`**
+  - Connection profiles now default to `~/.collectua/connections/`
+  - Certificate storage now defaults to `~/.collectua/certs/`
+  - Debug/file logs now default to `~/.collectua/logs/`
+  - TUI SQLite logs are stored at `~/.collectua/tui/logs.db`
 - **Centralized package defaults in `src/opcua_client/.env`**
   - Runtime defaults for CLI, TUI, collector, browse depth, logging, certificate paths, and profile directories are now sourced from `src/opcua_client/.env`
   - Configuration precedence is now CLI args > connection profile YAML > `.env` defaults > code fallback
@@ -62,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Connection profiles (YAML)** - Reusable configuration files for OPC UA connections
-  - Store profiles in `./connections/` or `~/.config/opcua-client/connections/`
+  - Store profiles in `~/.collectua/connections/`
   - Flat YAML schema matching `ConnectionConfig` fields (url, timeout, username, password, auth_policy, security_mode, cert_file, key_file)
   - Profile discovery searches repo-local then user config directory
   - Strict key validation with helpful error messages for unknown fields

@@ -19,10 +19,19 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Static, TabbedContent, TabPane, Button
+from textual.widgets import (
+    Footer,
+    Header,
+    Input,
+    Static,
+    TabbedContent,
+    TabPane,
+    Button,
+)
 
 from opcua_client.domain.alarm import Alarm
 from opcua_client.domain.connection import AuthPolicy
+from opcua_client.config.app_paths import collectua_logs_dir, collectua_tui_dir
 from opcua_client.config.env_defaults import get_formatted_str
 from opcua_client.config.runtime_config import RuntimeConfig
 from opcua_client.infrastructure.asyncua_compat import patch_create_session_server_uri
@@ -51,7 +60,10 @@ RETRO_RED = "#ff5f5f"
 
 
 class HelpScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "dismiss", "Close"), Binding("enter", "dismiss", "Close")]
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close"),
+        Binding("enter", "dismiss", "Close"),
+    ]
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -88,7 +100,10 @@ class HelpScreen(ModalScreen[None]):
 
 
 class StartupSplashScreen(ModalScreen[None]):
-    BINDINGS = [Binding("escape", "dismiss", "Skip"), Binding("enter", "dismiss", "Skip")]
+    BINDINGS = [
+        Binding("escape", "dismiss", "Skip"),
+        Binding("enter", "dismiss", "Skip"),
+    ]
 
     def __init__(self, ascii_art_path: Path) -> None:
         super().__init__()
@@ -134,7 +149,10 @@ class StartupSplashScreen(ModalScreen[None]):
             await asyncio.sleep(0.08)
 
         splash.update(
-            Text("\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]), style=f"bold {RETRO_GREEN}")
+            Text(
+                "\n".join(rendered + ["", "[ Press Enter / Esc to continue ]"]),
+                style=f"bold {RETRO_GREEN}",
+            )
         )
         await asyncio.sleep(0.65)
         self.dismiss(None)
@@ -155,14 +173,20 @@ class AlarmRow(Message):
             "event_id": alarm.event_id,
             "condition_id": str(alarm.alarm_id),
             "retain": "" if alarm.retain is None else str(bool(alarm.retain)),
-            "active_state": "" if alarm.active_state is None else str(bool(alarm.active_state)),
-            "acked_state": "" if alarm.acked_state is None else str(bool(alarm.acked_state)),
+            "active_state": ""
+            if alarm.active_state is None
+            else str(bool(alarm.active_state)),
+            "acked_state": ""
+            if alarm.acked_state is None
+            else str(bool(alarm.acked_state)),
             "raw": alarm.raw,
         }
 
 
 class ConnectionState(Message):
-    def __init__(self, connected: bool, reconnecting: bool = False, error: str = "") -> None:
+    def __init__(
+        self, connected: bool, reconnecting: bool = False, error: str = ""
+    ) -> None:
         super().__init__()
         self.connected = connected
         self.reconnecting = reconnecting
@@ -297,7 +321,9 @@ class TuiAlarmHandler:
         _logger.warning("Subscription status changed: %s", status)
 
     def configure_overloads_monitor(self, *, node_id: str, refresh_callback) -> None:
-        self._overload_monitor.configure(node_id=node_id, refresh_callback=refresh_callback)
+        self._overload_monitor.configure(
+            node_id=node_id, refresh_callback=refresh_callback
+        )
 
     def datachange_notification(self, node, val, data) -> None:
         _ = data
@@ -347,28 +373,6 @@ class OpcuaTuiApp(App[None]):
         self._search_index: int = 0
         self._alarm_tasks: set[asyncio.Task[Any]] = set()
 
-    # #region agent log
-    def _agent_log(self, *, runId: str, hypothesisId: str, location: str, message: str, data: dict) -> None:
-        import json
-        import time
-
-        payload = {
-            "sessionId": "3adc8d",
-            "runId": runId,
-            "hypothesisId": hypothesisId,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        try:
-            with open("debug-3adc8d.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-
-    # #endregion agent log
-
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield ConnectionStatusWidget(id="connection-status")
@@ -388,9 +392,17 @@ class OpcuaTuiApp(App[None]):
 
                         with Vertical(id="log-panel"):
                             with Horizontal(id="log-actions"):
-                                yield Button("Refresh logs", id="btn-refresh-logs", variant="primary")
-                                yield Button("Copy Logs", id="btn-copy-logs", variant="default")
-                                yield Button("Copy Errors", id="btn-copy-errors", variant="error")
+                                yield Button(
+                                    "Refresh logs",
+                                    id="btn-refresh-logs",
+                                    variant="primary",
+                                )
+                                yield Button(
+                                    "Copy Logs", id="btn-copy-logs", variant="default"
+                                )
+                                yield Button(
+                                    "Copy Errors", id="btn-copy-errors", variant="error"
+                                )
                             yield LogStreamWidget(id="log-stream")
         yield Footer()
 
@@ -400,10 +412,9 @@ class OpcuaTuiApp(App[None]):
         # Determine log DB path: use explicit config or default to user app data dir.
         db_path = self.config.log_db_path
         if not db_path:
-            user_home = Path.home()
-            log_dir = user_home / ".collectua" / "tui"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            db_path = str(log_dir / "logs.db")
+            tui_dir = collectua_tui_dir()
+            tui_dir.mkdir(parents=True, exist_ok=True)
+            db_path = str(tui_dir / "logs.db")
 
         self._log_handler = TuiSqliteLogHandler(
             Path(db_path),
@@ -416,11 +427,15 @@ class OpcuaTuiApp(App[None]):
         # in-app log panel, not in the terminal itself, so we remove any existing console
         # stream handlers and rely on the TUI handler (plus any file handlers) instead.
         for handler in list(root_logger.handlers):
-            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, logging.FileHandler
+            ):
                 root_logger.removeHandler(handler)
 
         root_logger.addHandler(self._log_handler)
-        root_logger.setLevel(getattr(logging, self.config.log_level.upper(), logging.INFO))
+        root_logger.setLevel(
+            getattr(logging, self.config.log_level.upper(), logging.INFO)
+        )
 
         # Do not block the Mount message handler on splash dismissal.
         # Textual screen lifecycle callbacks are message-pump driven, so startup
@@ -438,7 +453,6 @@ class OpcuaTuiApp(App[None]):
     def action_toggle_logs(self) -> None:
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
         tabbed.active = "tab-logs" if tabbed.active != "tab-logs" else "tab-alarms"
-
 
     def _load_all_logs(self) -> None:
         """Load all logs from SQLite into the widget (used when switching to Logs tab)."""
@@ -469,6 +483,7 @@ class OpcuaTuiApp(App[None]):
             self.copy_to_clipboard(text)
         except Exception:
             import pyperclip
+
             pyperclip.copy(text)
 
     def action_copy_logs(self) -> None:
@@ -479,34 +494,14 @@ class OpcuaTuiApp(App[None]):
 
             if not text.strip():
                 self.notify("No logs to copy yet.", timeout=2.0)
-                self._agent_log(
-                    runId="post-fix",
-                    hypothesisId="LOGCOPY",
-                    location="src/opcua_client/tui/app.py:action_copy_logs",
-                    message="Copy logs requested but buffer was empty",
-                    data={},
-                )
                 return
 
             self._copy_to_clipboard_robust(text)
             self.notify("Copied logs to clipboard.", timeout=2.0)
-            self._agent_log(
-                runId="post-fix",
-                hypothesisId="LOGCOPY",
-                location="src/opcua_client/tui/app.py:action_copy_logs",
-                message="Copied log buffer to clipboard",
-                data={"chars": len(text), "lines": text.count("\n")},
-            )
+
         except Exception as exc:
             _logger.exception("Failed to copy logs to clipboard")
             self.notify(f"Failed to copy logs: {exc}", timeout=3.0)
-            self._agent_log(
-                runId="post-fix",
-                hypothesisId="LOGCOPY",
-                location="src/opcua_client/tui/app.py:action_copy_logs",
-                message="Copy logs failed",
-                data={"error": str(exc)},
-            )
 
     def action_copy_errors(self) -> None:
         try:
@@ -567,11 +562,23 @@ class OpcuaTuiApp(App[None]):
             try:
                 endpoints = await client.connect_and_get_server_endpoints()
                 for endpoint in endpoints:
-                    policy_short = (getattr(endpoint, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
-                    mode_name = getattr(getattr(endpoint, "SecurityMode", None), "name", "")
+                    policy_short = (
+                        getattr(endpoint, "SecurityPolicyUri", "") or ""
+                    ).rsplit("#", 1)[-1] or "None"
+                    mode_name = getattr(
+                        getattr(endpoint, "SecurityMode", None), "name", ""
+                    )
                     normalized_mode = "None_" if mode_name == "None" else mode_name
-                    if policy_short == auth_policy.value and normalized_mode == conn.security_mode:
-                        advertised_uri = str(getattr(getattr(endpoint, "Server", None), "ApplicationUri", "") or "")
+                    if (
+                        policy_short == auth_policy.value
+                        and normalized_mode == conn.security_mode
+                    ):
+                        advertised_uri = str(
+                            getattr(
+                                getattr(endpoint, "Server", None), "ApplicationUri", ""
+                            )
+                            or ""
+                        )
                         if advertised_uri:
                             replacement_server_uri = advertised_uri
                         break
@@ -585,10 +592,16 @@ class OpcuaTuiApp(App[None]):
         reconnect_delay = self.config.collect.reconnect_delay_sec
         while not self._shutdown_requested:
             try:
-                self.post_message(ConnectionState(connected=False, reconnecting=True, error="Connecting..."))
+                self.post_message(
+                    ConnectionState(
+                        connected=False, reconnecting=True, error="Connecting..."
+                    )
+                )
                 self._client = await self._create_client()
                 await self._client.connect()
-                self.post_message(ConnectionState(connected=True, reconnecting=False, error=""))
+                self.post_message(
+                    ConnectionState(connected=True, reconnecting=False, error="")
+                )
                 _logger.info("Connected to %s", self.config.connection.url)
 
                 await self._load_node_tree()
@@ -597,7 +610,9 @@ class OpcuaTuiApp(App[None]):
                 break
             except Exception as exc:
                 _logger.exception("Connection loop error")
-                self.post_message(ConnectionState(connected=False, reconnecting=True, error=str(exc)))
+                self.post_message(
+                    ConnectionState(connected=False, reconnecting=True, error=str(exc))
+                )
                 await asyncio.sleep(reconnect_delay)
             finally:
                 await self._cleanup_client()
@@ -676,9 +691,13 @@ class OpcuaTuiApp(App[None]):
 
         if depth < max_depth and node_class == ua.NodeClass.Object:
             for child in await node.get_children(
-                nodeclassmask=ua.NodeClass.Object | ua.NodeClass.Variable | ua.NodeClass.Method
+                nodeclassmask=ua.NodeClass.Object
+                | ua.NodeClass.Variable
+                | ua.NodeClass.Method
             ):
-                child_tree = await self._browse_nodes(child, depth + 1, max_depth, target_namespaces)
+                child_tree = await self._browse_nodes(
+                    child, depth + 1, max_depth, target_namespaces
+                )
                 if child_tree:
                     children.append(child_tree)
 
@@ -697,7 +716,11 @@ class OpcuaTuiApp(App[None]):
             except ua.UaError:
                 var_type = None
 
-        expandable = node_class == ua.NodeClass.Object and depth < self.config.browse.max_depth and depth >= max_depth
+        expandable = (
+            node_class == ua.NodeClass.Object
+            and depth < self.config.browse.max_depth
+            and depth >= max_depth
+        )
 
         return {
             "id": node.nodeid.to_string(),
@@ -710,7 +733,9 @@ class OpcuaTuiApp(App[None]):
             "expandable": expandable,
         }
 
-    async def _fetch_child_tree_data(self, node_data: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _fetch_child_tree_data(
+        self, node_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         if not self._client:
             return []
 
@@ -746,7 +771,11 @@ class OpcuaTuiApp(App[None]):
         except Exception as exc:
             _logger.exception("Failed to lazy-load node children")
             tree_widget.remove_placeholder(tree_node)
-            tree_node.add(f"⚠ Failed to load: {exc}", data={"_load_error": True}, allow_expand=False)
+            tree_node.add(
+                f"⚠ Failed to load: {exc}",
+                data={"_load_error": True},
+                allow_expand=False,
+            )
             if node_id:
                 self._pending_focus_first_child_node_ids.discard(node_id)
             return
@@ -792,7 +821,8 @@ class OpcuaTuiApp(App[None]):
                 self._shutdown_requested
                 or self._client is not client
                 or self._subscription is not subscription
-                or getattr(self._subscription, "subscription_id", None) != subscription_id
+                or getattr(self._subscription, "subscription_id", None)
+                != subscription_id
             ):
                 _logger.info(
                     "Skipping ConditionRefresh for SubscriptionId=%s: client or subscription no longer active",
@@ -808,7 +838,8 @@ class OpcuaTuiApp(App[None]):
                     not self._shutdown_requested
                     and self._client is client
                     and self._subscription is subscription
-                    and getattr(self._subscription, "subscription_id", None) == subscription_id
+                    and getattr(self._subscription, "subscription_id", None)
+                    == subscription_id
                 ),
             )
 
@@ -841,10 +872,14 @@ class OpcuaTuiApp(App[None]):
             node_class = str(node_data.get("cls", ""))
 
             if node_class == "Variable":
-                panel.display_node(node_data, value_text=f"[{RETRO_AMBER}]Loading...[/{RETRO_AMBER}]")
+                panel.display_node(
+                    node_data, value_text=f"[{RETRO_AMBER}]Loading...[/{RETRO_AMBER}]"
+                )
                 if self._node_value_task and not self._node_value_task.done():
                     self._node_value_task.cancel()
-                self._node_value_task = asyncio.create_task(self._read_selected_node_value(node_data))
+                self._node_value_task = asyncio.create_task(
+                    self._read_selected_node_value(node_data)
+                )
             else:
                 panel.display_node(
                     node_data,
@@ -1018,7 +1053,9 @@ class OpcuaTuiApp(App[None]):
         self._copy_node_id_to_clipboard([node_id] if node_id else [])
 
     @on(NodeInfoPanelWidget.CopyNodeIdRequested)
-    def on_node_info_copy_requested(self, message: NodeInfoPanelWidget.CopyNodeIdRequested) -> None:
+    def on_node_info_copy_requested(
+        self, message: NodeInfoPanelWidget.CopyNodeIdRequested
+    ) -> None:
         self.action_copy_selected_node_id()
 
     async def action_reconnect(self) -> None:
@@ -1132,25 +1169,33 @@ class OpcuaTuiApp(App[None]):
             _search_recursive(tree.root)
         else:
             if self._search_results:
-                self._search_index = (self._search_index + 1) % len(self._search_results)
+                self._search_index = (self._search_index + 1) % len(
+                    self._search_results
+                )
 
         if self._search_results:
             target_node = self._search_results[self._search_index]
 
             parent = getattr(target_node, "parent", None)
             while parent is not None:
-                if getattr(parent, "allow_expand", False) and not getattr(parent, "is_expanded", False):
+                if getattr(parent, "allow_expand", False) and not getattr(
+                    parent, "is_expanded", False
+                ):
                     parent.expand()
                 parent = getattr(parent, "parent", None)
 
             tree.focus_node(target_node)
-            event.control.border_title = f"Matches ({self._search_index + 1}/{len(self._search_results)})"
+            event.control.border_title = (
+                f"Matches ({self._search_index + 1}/{len(self._search_results)})"
+            )
         else:
             event.control.border_title = "No matches"
 
     def action_toggle_main_tab(self) -> None:
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
-        tabbed.active = "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
+        tabbed.active = (
+            "tab-node-info" if tabbed.active == "tab-alarms" else "tab-alarms"
+        )
 
     @on(TabbedContent.TabActivated, "#tabbed-panel")
     def on_main_tab_activated(self, event: TabbedContent.TabActivated) -> None:

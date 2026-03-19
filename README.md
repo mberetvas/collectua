@@ -67,7 +67,7 @@ Want to automate certificates? Already handled — it will create them as needed
 
 - Package-wide runtime defaults are centralized in `src/opcua_client/.env`
 - The application resolves configuration with this precedence: CLI args > connection profile YAML > `.env` defaults > code fallback
-- Connection profiles are YAML blobs squirrelled in `./connections` or `~/.config/opcua-client/connections`
+- Connection profiles are YAML blobs stored in `~/.collectua/connections`
 - To auto-create profiles, provide a URL without one. You'll get prompted more than at airport security.
 - Security modes: "None_", "Sign", "SignAndEncrypt" (actual security feeling not included)
 - Logging & debug files can be tuned from `src/opcua_client/.env` or via `--mode debug`
@@ -92,8 +92,8 @@ OPCUA_LOG_LEVEL=INFO
 OPCUA_TIMEOUT=30.0
 OPCUA_MAX_DEPTH=10
 OPCUA_CSV_FILE=alarms.csv
-OPCUA_PROFILE_DIR=connections
-OPCUA_CERT_BASE_DIR=certs
+OPCUA_PROFILE_DIR=~/.collectua/connections
+OPCUA_CERT_BASE_DIR=~/.collectua/certs
 ```
 
 If you provide explicit certificate paths through a profile or runtime config, those paths are now honored for secure connections instead of being replaced by auto-generated defaults.

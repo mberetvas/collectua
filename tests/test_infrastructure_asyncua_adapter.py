@@ -131,7 +131,7 @@ def test_create_connection_from_runtime_config() -> None:
             reconnect_delay_sec=5,
             mode="prod",
             log_level="INFO",
-            debug_log_dir="logs/debug",
+            debug_log_dir=".collectua/logs",
             logging=None,
         )
     )

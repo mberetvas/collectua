@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+from opcua_client.config.app_paths import collectua_connections_dir, collectua_logs_dir
 from opcua_client.config.env_defaults import get_int_list, get_str
 from opcua_client.config.profile_loader import list_profiles, load_profile
 from opcua_client.config.runtime_config import RuntimeConfig
@@ -28,14 +29,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--debug-log-dir",
-        default=get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"),
+        default=get_str("OPCUA_DEBUG_LOG_DIR", str(collectua_logs_dir())),
         help="Directory for debug log files",
     )
 
     parser.add_argument(
         "--connection-profile",
         default=None,
-        help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+        help=f"Connection profile name from {collectua_connections_dir()}/",
     )
     parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
     parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
@@ -145,8 +146,8 @@ def main(argv=None) -> int:
         profiles = list_profiles()
         if not profiles:
             print(
-                "No connection profiles available. Create one in ./connections/ or "
-                "~/.config/opcua-client/connections/, or launch opcua-tui with connection args."
+                f"No connection profiles available. Create one in {collectua_connections_dir()}/, "
+                "or launch opcua-tui with connection args."
             )
             return 2
         selected_profile = _choose_profile_name(profiles)

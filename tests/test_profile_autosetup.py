@@ -1,3 +1,4 @@
+import builtins
 from pathlib import Path
 
 import pytest
@@ -16,10 +17,7 @@ def test_prompt_friendly_name_allows_empty_to_skip(
 ) -> None:
     # No existing profiles.
     monkeypatch.setattr(profile_loader, "profile_search_dirs", lambda: [])
-    monkeypatch.setattr(
-        "opcua_client.config.profile_autosetup.input",
-        lambda *args, **kwargs: "",
-    )
+    monkeypatch.setattr(builtins, "input", lambda *args, **kwargs: "")
 
     result = profile_autosetup._prompt_friendly_name("opc.tcp://example-host:4840")
     assert result == ""
@@ -36,12 +34,12 @@ def test_prompt_friendly_name_rejects_path_separators_and_uses_second_value(
     def _fake_input(prompt: str = "") -> str:  # type: ignore[override]
         return next(inputs)
 
-    monkeypatch.setattr("opcua_client.config.profile_autosetup.input", _fake_input)
+    monkeypatch.setattr(builtins, "input", _fake_input)
 
     result = profile_autosetup._prompt_friendly_name("opc.tcp://example-host:4840")
 
     out = capsys.readouterr().out
-    assert "must not contain '/' or '\\\\'" in out
+    assert "must not contain '/' or '\\'" in out
     assert result == "good-name"
 
 
@@ -68,7 +66,7 @@ def test_prompt_friendly_name_detects_duplicate_and_allows_override(
     def _fake_input(prompt: str = "") -> str:  # type: ignore[override]
         return next(inputs)
 
-    monkeypatch.setattr("opcua_client.config.profile_autosetup.input", _fake_input)
+    monkeypatch.setattr(builtins, "input", _fake_input)
 
     result = profile_autosetup._prompt_friendly_name("opc.tcp://other:4840")
     assert result == "Duplicate Name"

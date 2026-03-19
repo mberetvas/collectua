@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from .app_paths import collectua_connections_dir
 from .env_defaults import get_path
 
 PROFILE_KEYS = {
@@ -29,8 +30,7 @@ PROFILE_KEYS = {
 
 def profile_search_dirs() -> list[Path]:
     return [
-        get_path("OPCUA_PROFILE_DIR", "connections", relative_to_cwd=True),
-        get_path("OPCUA_FALLBACK_PROFILE_DIR", "~/.config/opcua-client/connections"),
+        get_path("OPCUA_PROFILE_DIR", str(collectua_connections_dir()), relative_to_cwd=True),
     ]
 
 
@@ -59,7 +59,7 @@ def _resolve_profile_path(profile_name: str) -> Path:
                 return file_path
 
     raise FileNotFoundError(
-        f"Connection profile '{profile_name}' not found in ./connections/ or ~/.config/opcua-client/connections/"
+        f"Connection profile '{profile_name}' not found in {collectua_connections_dir()}"
     )
 
 

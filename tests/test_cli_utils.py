@@ -59,7 +59,7 @@ def _make_runtime_with_logging(
 ) -> tuple[RuntimeConfig, ConnectionConfig]:
     file_cfg = FileLoggingConfig(
         enabled=file_enabled,
-        path=str(file_path) if file_path is not None else "logs/debug",
+        path=str(file_path) if file_path is not None else ".collectua/logs",
         name_pattern=file_pattern,
     )
     logging_cfg = LoggingConfig(
@@ -78,7 +78,7 @@ def _make_runtime_with_logging(
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode=mode,
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
     return runtime, conn
 
@@ -187,7 +187,7 @@ def test_ensure_server_trust_skips_insecure_mode(monkeypatch: pytest.MonkeyPatch
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     called = False
@@ -219,7 +219,7 @@ def test_ensure_server_trust_user_rejects(monkeypatch: pytest.MonkeyPatch) -> No
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     async def fake_collect(config: RuntimeConfig) -> bytes:
@@ -255,7 +255,7 @@ def test_ensure_server_trust_user_accepts_and_persists(tmp_path: Path, monkeypat
         browse=BrowseConfig(),
         collect=CollectConfig(),
         mode="prod",
-        debug_log_dir="logs/debug",
+        debug_log_dir=".collectua/logs",
     )
 
     async def fake_collect(config: RuntimeConfig) -> bytes:

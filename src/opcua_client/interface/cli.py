@@ -10,10 +10,11 @@ from pathlib import Path
 import yaml
 from asyncua import Client, ua
 
+from ..config.app_paths import collectua_connections_dir, collectua_logs_dir
 from ..config.env_defaults import get_bool, get_formatted_str, get_int_list, get_str
 from ..config.profile_autosetup import ensure_profile_for_url_interactive
 from ..config.profile_loader import list_profiles, load_profile, resolve_profile_path
-from ..config.runtime_config import RuntimeConfig
+from ..config.runtime_config import ConnectionConfig, RuntimeConfig
 from ..domain.connection import AuthPolicy
 from ..infrastructure.asyncua_compat import patch_create_session_server_uri
 from ..infrastructure.config_loader import load_connection_from_cli_args
@@ -24,8 +25,8 @@ from ..security.cert_paths import ensure_client_certificates
 def _configure_logging(
     mode: str,
     log_level: str,
-    debug_log_dir: str = "logs/debug",
-    connection_config: "ConnectionConfig | None" = None,
+    debug_log_dir: str = str(collectua_logs_dir()),
+    connection_config: ConnectionConfig | None = None,
 ) -> str | None:
     """
     Configure logging with optional file handler for debug mode or per-connection settings.
@@ -39,8 +40,6 @@ def _configure_logging(
     Returns:
         Path to debug log file if created, else None
     """
-    from ..config.runtime_config import ConnectionConfig
-
     # Get root logger and clear any existing handlers to avoid duplicates
     root_logger = logging.getLogger()
     root_logger.handlers.clear()
@@ -60,7 +59,9 @@ def _configure_logging(
     file_enabled = get_bool("OPCUA_LOG_FILE_ENABLED", False)
     file_level = logging.DEBUG
     file_dir = Path(debug_log_dir)
-    file_name_pattern = get_str("OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log")
+    file_name_pattern = get_str(
+        "OPCUA_LOG_FILE_NAME_PATTERN", "debug-{timestamp}-pid{pid}.log"
+    )
 
     if connection_config and connection_config.logging_config:
         file_config = connection_config.logging_config.file
@@ -85,7 +86,9 @@ def _configure_logging(
         # Create unique filename using pattern
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         pid = os.getpid()
-        debug_log_file = file_dir / file_name_pattern.format(timestamp=timestamp, pid=pid)
+        debug_log_file = file_dir / file_name_pattern.format(
+            timestamp=timestamp, pid=pid
+        )
 
         file_handler = logging.FileHandler(debug_log_file)
         file_handler.setLevel(file_level)
@@ -112,34 +115,6 @@ def _short_policy_from_uri(policy_uri: str) -> str:
     return policy_uri
 
 
-# #region agent log
-def _agent_log(*, runId: str, hypothesisId: str, location: str, message: str, data: dict) -> None:
-    """
-    Debug-mode NDJSON logger for this Cursor session.
-    Writes to: debug-3adc8d.log
-    """
-    import json
-    import time
-
-    payload = {
-        "sessionId": "3adc8d",
-        "runId": runId,
-        "hypothesisId": hypothesisId,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        with open("debug-3adc8d.log", "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-# #endregion agent log
-
-
 async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
     """
     Connect to the OPC UA endpoint in discovery mode and collect the server
@@ -161,24 +136,6 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
     desired_policy = conn.auth_policy or "None"
     desired_mode = conn.security_mode or "None_"
 
-    # #region agent log
-    _agent_log(
-        runId="pre-fix",
-        hypothesisId="A",
-        location="src/opcua_client/interface/cli.py:_collect_server_certificate:desired",
-        message="Computed desired security selector from connection config",
-        data={
-            "url": conn.url,
-            "conn_auth_policy_type": type(conn.auth_policy).__name__,
-            "conn_auth_policy_value": str(conn.auth_policy),
-            "conn_security_mode_type": type(conn.security_mode).__name__,
-            "conn_security_mode_value": str(conn.security_mode),
-            "desired_policy": str(desired_policy),
-            "desired_mode": str(desired_mode),
-        },
-    )
-    # #endregion agent log
-
     matched_cert: bytes | None = None
     ep_summaries: list[dict] = []
     for ep in endpoints:
@@ -190,7 +147,9 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
         security_mode = "None_" if mode_name == "None" else mode_name
 
         raw_cert = getattr(ep, "ServerCertificate", b"") or b""
-        cert_len = len(raw_cert) if not isinstance(raw_cert, memoryview) else raw_cert.nbytes
+        cert_len = (
+            len(raw_cert) if not isinstance(raw_cert, memoryview) else raw_cert.nbytes
+        )
         ep_summaries.append(
             {
                 "policy_short": policy_short,
@@ -211,22 +170,9 @@ async def _collect_server_certificate(config: RuntimeConfig) -> bytes:
         break
 
     if not matched_cert:
-        # #region agent log
-        _agent_log(
-            runId="pre-fix",
-            hypothesisId="A",
-            location="src/opcua_client/interface/cli.py:_collect_server_certificate:no-match",
-            message="No endpoint matched desired policy/mode (or cert was empty)",
-            data={
-                "desired_policy": str(desired_policy),
-                "desired_mode": str(desired_mode),
-                "endpoint_count": len(endpoints),
-                "endpoints": ep_summaries[:12],
-            },
-        )
-        # #endregion agent log
         raise RuntimeError(
-            f"No server certificate available for endpoint with policy={desired_policy}, " f"mode={desired_mode} at {conn.url}"
+            f"No server certificate available for endpoint with policy={desired_policy}, "
+            f"mode={desired_mode} at {conn.url}"
         )
 
     return matched_cert
@@ -288,7 +234,9 @@ async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) 
         profile_path = resolve_profile_path(profile_name)
         cert_path = profile_path.with_suffix(".der")
     else:
-        print("[trust warning] No connection profile associated with this connection; server trust will not be persisted.")
+        print(
+            "[trust warning] No connection profile associated with this connection; server trust will not be persisted."
+        )
 
     print("")
     print("The OPC UA server certificate for this connection is not yet trusted.")
@@ -304,7 +252,9 @@ async def _ensure_server_trust(config: RuntimeConfig, profile_name: str | None) 
             "certificate as trusted via profile/CLI."
         )
 
-    answer = input("Do you want to trust this server certificate? [y/N]: ").strip().lower()
+    answer = (
+        input("Do you want to trust this server certificate? [y/N]: ").strip().lower()
+    )
     if answer != "y":
         raise RuntimeError("Server certificate not trusted; aborting connection.")
 
@@ -346,16 +296,30 @@ async def _connect_smoke(config: RuntimeConfig):
             else:
                 cert_file, key_file = ensure_client_certificates()
             auth_policy = AuthPolicy.from_value(conn.auth_policy)
-            await client.set_security_string(f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}")
+            await client.set_security_string(
+                f"{auth_policy.to_asyncua_format()},{conn.security_mode},{cert_file},{key_file}"
+            )
             replacement_server_uri = ""
             try:
                 endpoints = await client.connect_and_get_server_endpoints()
                 for endpoint in endpoints:
-                    policy_short = (getattr(endpoint, "SecurityPolicyUri", "") or "").rsplit("#", 1)[-1] or "None"
-                    mode_name = getattr(getattr(endpoint, "SecurityMode", None), "name", "")
+                    policy_short = (
+                        getattr(endpoint, "SecurityPolicyUri", "") or ""
+                    ).rsplit("#", 1)[-1] or "None"
+                    mode_name = getattr(
+                        getattr(endpoint, "SecurityMode", None), "name", ""
+                    )
                     normalized_mode = "None_" if mode_name == "None" else mode_name
-                    if policy_short == auth_policy.value and normalized_mode == conn.security_mode:
-                        advertised_uri = str(getattr(getattr(endpoint, "Server", None), "ApplicationUri", "") or "")
+                    if (
+                        policy_short == auth_policy.value
+                        and normalized_mode == conn.security_mode
+                    ):
+                        advertised_uri = str(
+                            getattr(
+                                getattr(endpoint, "Server", None), "ApplicationUri", ""
+                            )
+                            or ""
+                        )
                         if advertised_uri:
                             replacement_server_uri = advertised_uri
                         break
@@ -365,7 +329,9 @@ async def _connect_smoke(config: RuntimeConfig):
                 patch_create_session_server_uri(client, replacement_server_uri)
 
         await client.connect()
-        logger.info("Connected. Negotiated session timeout: %dms", client.session_timeout)
+        logger.info(
+            "Connected. Negotiated session timeout: %dms", client.session_timeout
+        )
         root = client.nodes.root
         children = await root.get_children()
         logger.info("Root children count: %d", len(children))
@@ -394,7 +360,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--debug-log-dir",
-        default=get_str("OPCUA_DEBUG_LOG_DIR", "logs/debug"),
+        default=get_str("OPCUA_DEBUG_LOG_DIR", str(collectua_logs_dir())),
         help="Directory for debug log files (only used in debug mode)",
     )
     parser.add_argument(
@@ -407,14 +373,33 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--connection-profile",
         default=None,
-        help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+        help=f"Connection profile name from {collectua_connections_dir()}/",
     )
     parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
-    parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
-    parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
-    parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
-    parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
-    parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Socket timeout (seconds)",
+    )
+    parser.add_argument(
+        "--session-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Session timeout (milliseconds)",
+    )
+    parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Request timeout (milliseconds)",
+    )
+    parser.add_argument(
+        "--username", default=argparse.SUPPRESS, help="Username for user/password auth"
+    )
+    parser.add_argument(
+        "--password", default=argparse.SUPPRESS, help="Password for user/password auth"
+    )
     parser.add_argument(
         "--auth-policy",
         default=argparse.SUPPRESS,
@@ -434,7 +419,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    parser.add_argument(
+        "--server-cert",
+        default=argparse.SUPPRESS,
+        help="Server certificate path metadata",
+    )
     parser.add_argument(
         "--trust-cert",
         action="store_true",
@@ -452,7 +441,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Optional NodeId for the Siemens Overloads state monitor",
     )
-    parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
+    parser.add_argument(
+        "--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth"
+    )
     parser.add_argument(
         "--target-namespace",
         type=int,
@@ -460,9 +451,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
-    parser.add_argument("--publish-interval-ms", type=int, default=collector.PUBLISH_INTERVAL_MS, help="Subscription publish interval")
-    parser.add_argument("--reconnect-delay-sec", type=int, default=collector.RECONNECT_DELAY_SEC, help="Reconnect delay in seconds")
+    parser.add_argument(
+        "--csv-file", default=collector.CSV_FILE, help="Output CSV file path"
+    )
+    parser.add_argument(
+        "--publish-interval-ms",
+        type=int,
+        default=collector.PUBLISH_INTERVAL_MS,
+        help="Subscription publish interval",
+    )
+    parser.add_argument(
+        "--reconnect-delay-sec",
+        type=int,
+        default=collector.RECONNECT_DELAY_SEC,
+        help="Reconnect delay in seconds",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=False)
 
@@ -470,13 +473,17 @@ def _build_parser() -> argparse.ArgumentParser:
         subparser.add_argument(
             "--connection-profile",
             default=None,
-            help="Connection profile name from ./connections/ or ~/.config/opcua-client/connections/",
+            help=f"Connection profile name from {collectua_connections_dir()}/",
         )
 
     browse_parser = subparsers.add_parser("browse", help="Browse OPC UA node tree")
     _add_connection_profile_arg(browse_parser)
-    browse_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
-    browse_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
+    browse_parser.add_argument(
+        "--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL"
+    )
+    browse_parser.add_argument(
+        "--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth"
+    )
     browse_parser.add_argument(
         "--target-namespace",
         type=int,
@@ -484,12 +491,23 @@ def _build_parser() -> argparse.ArgumentParser:
         default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    browse_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
+    browse_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Socket timeout (seconds)",
+    )
 
-    collect_parser = subparsers.add_parser("collect", help="Subscribe to alarms/events and write CSV")
+    collect_parser = subparsers.add_parser(
+        "collect", help="Subscribe to alarms/events and write CSV"
+    )
     _add_connection_profile_arg(collect_parser)
-    collect_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
-    collect_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
+    collect_parser.add_argument(
+        "--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL"
+    )
+    collect_parser.add_argument(
+        "--csv-file", default=collector.CSV_FILE, help="Output CSV file path"
+    )
     collect_parser.add_argument(
         "--publish-interval-ms",
         type=int,
@@ -520,14 +538,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional NodeId for the Siemens Overloads state monitor",
     )
 
-    connect_parser = subparsers.add_parser("connect", help="Connection smoke test (supports secure/insecure)")
+    connect_parser = subparsers.add_parser(
+        "connect", help="Connection smoke test (supports secure/insecure)"
+    )
     _add_connection_profile_arg(connect_parser)
-    connect_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
-    connect_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
-    connect_parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
-    connect_parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
-    connect_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
-    connect_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
+    connect_parser.add_argument(
+        "--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL"
+    )
+    connect_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Socket timeout (seconds)",
+    )
+    connect_parser.add_argument(
+        "--session-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Session timeout (milliseconds)",
+    )
+    connect_parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Request timeout (milliseconds)",
+    )
+    connect_parser.add_argument(
+        "--username", default=argparse.SUPPRESS, help="Username for user/password auth"
+    )
+    connect_parser.add_argument(
+        "--password", default=argparse.SUPPRESS, help="Password for user/password auth"
+    )
     connect_parser.add_argument(
         "--auth-policy",
         default=argparse.SUPPRESS,
@@ -540,7 +581,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    connect_parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    connect_parser.add_argument(
+        "--server-cert",
+        default=argparse.SUPPRESS,
+        help="Server certificate path metadata",
+    )
     connect_parser.add_argument(
         "--trust-cert",
         action="store_true",
@@ -554,14 +599,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Preferred OPC UA session LocaleIds (space-separated, e.g. en-US de-DE)",
     )
 
-    config_parser = subparsers.add_parser("config", help="Show or validate normalized runtime configuration")
+    config_parser = subparsers.add_parser(
+        "config", help="Show or validate normalized runtime configuration"
+    )
     _add_connection_profile_arg(config_parser)
-    config_parser.add_argument("--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL")
-    config_parser.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Socket timeout (seconds)")
-    config_parser.add_argument("--session-timeout", type=int, default=argparse.SUPPRESS, help="Session timeout (milliseconds)")
-    config_parser.add_argument("--request-timeout", type=int, default=argparse.SUPPRESS, help="Request timeout (milliseconds)")
-    config_parser.add_argument("--username", default=argparse.SUPPRESS, help="Username for user/password auth")
-    config_parser.add_argument("--password", default=argparse.SUPPRESS, help="Password for user/password auth")
+    config_parser.add_argument(
+        "--url", default=argparse.SUPPRESS, help="OPC UA endpoint URL"
+    )
+    config_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Socket timeout (seconds)",
+    )
+    config_parser.add_argument(
+        "--session-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Session timeout (milliseconds)",
+    )
+    config_parser.add_argument(
+        "--request-timeout",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Request timeout (milliseconds)",
+    )
+    config_parser.add_argument(
+        "--username", default=argparse.SUPPRESS, help="Username for user/password auth"
+    )
+    config_parser.add_argument(
+        "--password", default=argparse.SUPPRESS, help="Password for user/password auth"
+    )
     config_parser.add_argument(
         "--auth-policy",
         default=argparse.SUPPRESS,
@@ -574,7 +642,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=["None_", "Sign", "SignAndEncrypt"],
         help="Security mode",
     )
-    config_parser.add_argument("--server-cert", default=argparse.SUPPRESS, help="Server certificate path metadata")
+    config_parser.add_argument(
+        "--server-cert",
+        default=argparse.SUPPRESS,
+        help="Server certificate path metadata",
+    )
     config_parser.add_argument(
         "--trust-cert",
         action="store_true",
@@ -592,7 +664,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Optional NodeId for the Siemens Overloads state monitor",
     )
-    config_parser.add_argument("--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth")
+    config_parser.add_argument(
+        "--max-depth", type=int, default=browse.MAX_DEPTH, help="Browse depth"
+    )
     config_parser.add_argument(
         "--target-namespace",
         type=int,
@@ -600,7 +674,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=get_int_list("OPCUA_TARGET_NAMESPACES", []),
         help="Optional namespace index filter (space-separated). Empty means all namespaces.",
     )
-    config_parser.add_argument("--csv-file", default=collector.CSV_FILE, help="Output CSV file path")
+    config_parser.add_argument(
+        "--csv-file", default=collector.CSV_FILE, help="Output CSV file path"
+    )
     config_parser.add_argument(
         "--publish-interval-ms",
         type=int,
@@ -662,8 +738,8 @@ def main(argv=None) -> int:
             profiles = list_profiles()
             if not profiles:
                 print(
-                    "No connection profiles available. Create one in ./connections/ or "
-                    "~/.config/opcua-client/connections/, or launch collectua with connection args."
+                    f"No connection profiles available. Create one in {collectua_connections_dir()}/, "
+                    "or launch collectua with connection args."
                 )
                 return 2
             # Use TUI profile chooser function
@@ -716,7 +792,9 @@ def main(argv=None) -> int:
             return 2
 
         # Configure logging with connection config
-        debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir, config.connection)
+        debug_log_file = _configure_logging(
+            config.mode, config.log_level, config.debug_log_dir, config.connection
+        )
         if debug_log_file:
             logger = logging.getLogger("cli")
             logger.info(f"Debug log: {debug_log_file}")
@@ -741,7 +819,7 @@ def main(argv=None) -> int:
     if args.command == "list-profiles":
         profiles = list_profiles()
         if not profiles:
-            print("No connection profiles found in ./connections/ or ~/.config/opcua-client/connections/")
+            print(f"No connection profiles found in {collectua_connections_dir()}/")
             return 0
         print("Available connection profiles:")
         for name in profiles:
@@ -802,7 +880,9 @@ def main(argv=None) -> int:
         return 2
 
     # Configure logging with connection config
-    debug_log_file = _configure_logging(config.mode, config.log_level, config.debug_log_dir, config.connection)
+    debug_log_file = _configure_logging(
+        config.mode, config.log_level, config.debug_log_dir, config.connection
+    )
     if debug_log_file:
         logger = logging.getLogger("cli")
         logger.info(f"Debug log: {debug_log_file}")
@@ -860,4 +940,3 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

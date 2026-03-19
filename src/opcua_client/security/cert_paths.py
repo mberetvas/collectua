@@ -14,6 +14,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding, load_pem_private_key
 from cryptography.x509.oid import ExtendedKeyUsageOID
 
+from ..config.app_paths import collectua_certs_base_dir
 from ..config.env_defaults import get_formatted_str, get_path, get_str
 
 _logger = logging.getLogger("certs")
@@ -26,14 +27,6 @@ class ClientCertPaths:
     private_dir: Path
     cert_file: Path
     key_file: Path
-
-
-def _config_base_dir() -> Path:
-    """
-    Return the base directory for config-scoped certificates, under
-    ~/.config/opcua-client/certs.
-    """
-    return get_path("OPCUA_FALLBACK_CERT_BASE_DIR", "~/.config/opcua-client/certs")
 
 
 def _ensure_base_dirs(base_dir: Path) -> ClientCertPaths:
@@ -60,22 +53,14 @@ def _ensure_base_dirs(base_dir: Path) -> ClientCertPaths:
 
 def get_default_client_cert_paths() -> ClientCertPaths:
     """
-    Resolve default client certificate paths using this strategy:
-
-    1. Prefer ./certs/ relative to the current working directory. Create it
-       (and subdirectories) if it does not exist.
-    2. If that fails for any reason (e.g., permissions), fall back to
-       ~/.config/opcua-client/certs.
+    Resolve default client certificate paths under the collectua root.
     """
-    cwd_base = get_path("OPCUA_CERT_BASE_DIR", "certs", relative_to_cwd=True)
-
+    base_dir = get_path("OPCUA_CERT_BASE_DIR", str(collectua_certs_base_dir()), relative_to_cwd=True)
     try:
-        return _ensure_base_dirs(cwd_base)
+        return _ensure_base_dirs(base_dir)
     except Exception:
-        _logger.exception("Failed to use ./certs directory, falling back to config directory")
-
-    config_base = _config_base_dir()
-    return _ensure_base_dirs(config_base)
+        _logger.exception("Failed to initialize certificate directory %s", base_dir)
+        raise
 
 
 def _generate_self_signed_client_certificate(paths: ClientCertPaths) -> None:

@@ -1,3 +1,5 @@
+import builtins
+
 import pytest
 
 from opcua_client import tui
@@ -106,7 +108,7 @@ def test_tui_profile_listing_uses_friendly_name_when_available(
     monkeypatch.setattr(tui, "load_profile", _fake_load_profile)
 
     # Simulate user selecting the first (and only) profile.
-    monkeypatch.setattr(tui, "_choose_profile_name", lambda profiles: "prod")
+    monkeypatch.setattr(builtins, "input", lambda: "1")
 
     class _App(_DummyApp):
         def __init__(self, config):

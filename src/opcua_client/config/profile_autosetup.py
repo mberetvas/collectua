@@ -10,6 +10,7 @@ from typing import Iterable, List
 import yaml
 from asyncua import Client, ua
 
+from .app_paths import collectua_connections_dir
 from .env_defaults import get_float, get_int, get_path
 from .profile_loader import load_profile, profile_search_dirs, resolve_profile_path
 
@@ -138,19 +139,11 @@ def find_existing_profile_for_url(url: str) -> str | None:
 
 def _choose_profile_directory_for_creation() -> Path:
     """
-    Prefer ./connections/ under the current working directory, falling back to
-    ~/.config/opcua-client/connections/ if needed.
+    Use the canonical collectua connections directory.
     """
-    cwd_dir = get_path("OPCUA_PROFILE_DIR", "connections", relative_to_cwd=True)
-    try:
-        cwd_dir.mkdir(parents=True, exist_ok=True)
-        return cwd_dir
-    except Exception:
-        pass
-
-    config_dir = get_path("OPCUA_FALLBACK_PROFILE_DIR", "~/.config/opcua-client/connections")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir
+    profile_dir = get_path("OPCUA_PROFILE_DIR", str(collectua_connections_dir()), relative_to_cwd=True)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    return profile_dir
 
 
 async def _discover_server_security_options(url: str) -> List[DiscoveredMode]:

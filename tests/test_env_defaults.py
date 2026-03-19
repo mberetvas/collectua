@@ -4,6 +4,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from opcua_client.config import profile_loader
+from opcua_client.config.app_paths import collectua_connections_dir
 from opcua_client.config.env_defaults import clear_env_defaults_cache
 from opcua_client.config.runtime_config import RuntimeConfig
 from opcua_client.security.cert_paths import get_default_client_cert_paths
@@ -62,7 +63,6 @@ def test_profile_search_dirs_use_env_overrides(tmp_path: Path, monkeypatch) -> N
         "\n".join(
             [
                 "OPCUA_PROFILE_DIR=custom-profiles",
-                "OPCUA_FALLBACK_PROFILE_DIR=~/opcua-test-profiles",
             ]
         ),
         encoding="utf-8",
@@ -75,7 +75,20 @@ def test_profile_search_dirs_use_env_overrides(tmp_path: Path, monkeypatch) -> N
     search_dirs = profile_loader.profile_search_dirs()
 
     assert search_dirs[0] == tmp_path / "custom-profiles"
-    assert search_dirs[1] == Path("~/opcua-test-profiles").expanduser()
+
+    clear_env_defaults_cache()
+
+
+def test_profile_search_dirs_default_to_collectua_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OPCUA_PROFILE_DIR", raising=False)
+    monkeypatch.delenv("OPCUA_ENV_FILE", raising=False)
+    monkeypatch.setattr("opcua_client.config.app_paths.Path.home", lambda: tmp_path)
+    clear_env_defaults_cache()
+
+    search_dirs = profile_loader.profile_search_dirs()
+
+    assert search_dirs == [collectua_connections_dir()]
+    assert search_dirs[0] == tmp_path / ".collectua" / "connections"
 
     clear_env_defaults_cache()
 
