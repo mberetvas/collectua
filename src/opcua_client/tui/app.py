@@ -208,9 +208,15 @@ class NodeSelected(Message):
 
 
 class TuiAlarmHandler:
-    def __init__(self, csv_path: str, app: "OpcuaTuiApp"):
+    def __init__(
+        self,
+        csv_path: str,
+        app: "OpcuaTuiApp",
+        csv_queue: "asyncio.Queue[dict[str, Any]] | None" = None,
+    ):
         self.csv_path = csv_path
         self.app = app
+        self._csv_queue = csv_queue
         self._ensure_csv_header()
         self._active_alarms: Dict[str, Alarm] = {}
         self._overload_monitor = OverloadRecoveryMonitor(_logger)
@@ -310,9 +316,17 @@ class TuiAlarmHandler:
 
             self._update_active_alarms({**row, "event_id_bytes": alarm.event_id_bytes})
 
-            with open(self.csv_path, "a", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
-                writer.writerow(row)
+            # Offload CSV writes to an async queue when available so we don't
+            # block the subscription callback on disk I/O.
+            if self._csv_queue is not None:
+                try:
+                    self._csv_queue.put_nowait(row)
+                except Exception:
+                    _logger.exception("Failed to enqueue alarm row for CSV writer")
+            else:
+                with open(self.csv_path, "a", newline="") as f:
+                    writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+                    writer.writerow(row)
 
             self.app.post_message(AlarmRow(alarm))
 
@@ -368,13 +382,19 @@ class OpcuaTuiApp(App[None]):
         self._node_value_task: asyncio.Task | None = None
         self._shutdown_requested = False
         self._log_handler: TuiSqliteLogHandler | None = None
+        self._log_queue: asyncio.Queue | None = None
+        self._log_writer_task: asyncio.Task | None = None
         self._last_log_row_id: int = 0
+        self._log_refresh_in_progress: bool = False
+        self._log_poll_task: asyncio.Task | None = None
         self._selected_node: dict[str, Any] | None = None
         self._pending_focus_first_child_node_ids: set[str] = set()
         self._search_query: str = ""
         self._search_results: list[Any] = []
         self._search_index: int = 0
         self._alarm_tasks: set[asyncio.Task[Any]] = set()
+        self._alarm_csv_queue: asyncio.Queue | None = None
+        self._alarm_csv_task: asyncio.Task | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -428,6 +448,9 @@ class OpcuaTuiApp(App[None]):
             Path(db_path),
             retention_days=self.config.log_retention_days,
         )
+        # Queue for offloading SQLite writes from the Textual event loop.
+        self._log_queue = asyncio.Queue(maxsize=1000)
+        self._log_handler.set_async_queue(self._log_queue)
         root_logger = logging.getLogger()
 
         # When launched via the CLI, logging is configured with a console StreamHandler that
@@ -445,6 +468,17 @@ class OpcuaTuiApp(App[None]):
             getattr(logging, self.config.log_level.upper(), logging.INFO)
         )
 
+        # Background task that drains the log queue and performs SQLite writes
+        # using asyncio.to_thread so the UI remains responsive under heavy logging.
+        if self._log_writer_task is None or self._log_writer_task.done():
+            self._log_writer_task = asyncio.create_task(self._run_log_writer())
+
+        # Queue and background task for offloading alarm CSV writes.
+        if self._alarm_csv_queue is None:
+            self._alarm_csv_queue = asyncio.Queue(maxsize=1000)
+        if self._alarm_csv_task is None or self._alarm_csv_task.done():
+            self._alarm_csv_task = asyncio.create_task(self._run_alarm_csv_writer())
+
         # Do not block the Mount message handler on splash dismissal.
         # Textual screen lifecycle callbacks are message-pump driven, so startup
         # continues from the dismiss callback once the splash is gone.
@@ -452,6 +486,11 @@ class OpcuaTuiApp(App[None]):
             StartupSplashScreen(self._ascii_art_path),
             callback=lambda _result: self._start_connection_supervisor(),
         )
+
+        # Periodically stream new log records into the widget so the Logs tab
+        # stays up to date without full reloads.
+        if self._log_poll_task is None or self._log_poll_task.done():
+            self._log_poll_task = asyncio.create_task(self._run_log_poller())
 
     def _start_connection_supervisor(self) -> None:
         if self._runner_task and not self._runner_task.done():
@@ -462,28 +501,168 @@ class OpcuaTuiApp(App[None]):
         tabbed = self.query_one("#tabbed-panel", TabbedContent)
         tabbed.active = "tab-logs" if tabbed.active != "tab-logs" else "tab-alarms"
 
-    def _load_all_logs(self) -> None:
-        """Load all logs from SQLite into the widget (used when switching to Logs tab)."""
-        if not self._log_handler:
+    async def _run_log_writer(self) -> None:
+        """Background task that persists log records from the async queue."""
+        if not self._log_handler or not self._log_queue:
             return
 
+        handler = self._log_handler
+        queue = self._log_queue
+
+        while not self._shutdown_requested:
+            try:
+                (
+                    timestamp,
+                    timestamp_epoch,
+                    levelno,
+                    levelname,
+                    logger_name,
+                    message,
+                ) = await queue.get()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                _logger.exception("Log writer queue receive failed")
+                continue
+
+            try:
+                await asyncio.to_thread(
+                    handler._write_record_sync,  # type: ignore[attr-defined]
+                    timestamp=timestamp,
+                    timestamp_epoch=timestamp_epoch,
+                    levelno=levelno,
+                    levelname=levelname,
+                    logger_name=logger_name,
+                    message=message,
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                _logger.exception("Failed to write log record to SQLite")
+
+    async def _run_alarm_csv_writer(self) -> None:
+        """Background task that persists alarm rows to the CSV file."""
+        if not self._alarm_csv_queue:
+            return
+
+        queue = self._alarm_csv_queue
+        csv_path = self.config.collect.csv_file
+
+        while not self._shutdown_requested:
+            try:
+                row = await queue.get()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                _logger.exception("Alarm CSV writer queue receive failed")
+                continue
+
+            try:
+                await asyncio.to_thread(
+                    self._write_alarm_row_sync,
+                    csv_path,
+                    row,
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                _logger.exception("Alarm CSV writer thread failed")
+
+    @staticmethod
+    def _write_alarm_row_sync(csv_path: str, row: Mapping[str, Any]) -> None:
         try:
+            with open(csv_path, "a", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_HEADERS)
+                writer.writerow(row)
+        except Exception:
+            _logger.exception("Failed to write alarm row to CSV")
+
+    async def _run_log_poller(self) -> None:
+        """Background task that periodically streams new logs into the widget."""
+        poll_interval_sec = 2.0
+        while not self._shutdown_requested:
+            await asyncio.sleep(poll_interval_sec)
+
+            if not self._log_handler:
+                continue
+
+            # Only poll when Logs tab is active to avoid unnecessary work.
+            try:
+                tabbed = self.query_one("#tabbed-panel", TabbedContent)
+            except Exception:
+                continue
+
+            if tabbed.active != "tab-logs":
+                continue
+
+            try:
+                rows = await asyncio.to_thread(
+                    self._log_handler.fetch_since, self._last_log_row_id, 200
+                )
+            except Exception:
+                _logger.exception("Failed to fetch incremental logs from SQLite")
+                continue
+
+            if not rows:
+                continue
+
             from .widgets.log_stream import style_for_level
 
-            rows = self._log_handler.fetch_recent(limit=1000)
-
-            if rows:
+            try:
                 log_stream = self.query_one("#log-stream")
-                log_stream.clear()
-                # rows are newest-first; we want newest at top of widget, so iterate reversed.
-                for row in reversed(rows):
+            except Exception:
+                continue
+
+            # rows are oldest-first (fetch_since order); append so newest remains at top.
+            batch_size = 50
+            for start in range(0, len(rows), batch_size):
+                batch = rows[start : start + batch_size]
+                for row in batch:
                     log_stream.add_entry(
                         Text(row.message, style=style_for_level(row.levelno)),
                         levelno=row.levelno,
                     )
                     self._last_log_row_id = row.id
+                await asyncio.sleep(0)
+
+    async def _load_all_logs_async(self) -> None:
+        """Load all logs from SQLite into the widget in async batches."""
+        if not self._log_handler:
+            return
+
+        if self._log_refresh_in_progress:
+            return
+
+        self._log_refresh_in_progress = True
+        try:
+            from .widgets.log_stream import style_for_level
+
+            # Run the blocking DB call in a worker thread.
+            rows = await asyncio.to_thread(self._log_handler.fetch_recent, 1000)
+
+            if not rows:
+                return
+
+            log_stream = self.query_one("#log-stream")
+            log_stream.clear()
+
+            # rows are newest-first; we want newest at top of widget, so iterate reversed.
+            ordered = list(reversed(rows))
+            batch_size = 100
+            for start in range(0, len(ordered), batch_size):
+                batch = ordered[start : start + batch_size]
+                for row in batch:
+                    log_stream.add_entry(
+                        Text(row.message, style=style_for_level(row.levelno)),
+                        levelno=row.levelno,
+                    )
+                    self._last_log_row_id = row.id
+                # Yield to the event loop so the UI stays responsive.
+                await asyncio.sleep(0)
         except Exception:
             _logger.exception("Error loading all logs from SQLite")
+        finally:
+            self._log_refresh_in_progress = False
 
     def _copy_to_clipboard_robust(self, text: str) -> None:
         """Try Textual clipboard first; fall back to pyperclip."""
@@ -561,7 +740,8 @@ class OpcuaTuiApp(App[None]):
 
     @on(Button.Pressed, "#btn-refresh-logs")
     def on_refresh_logs_button(self) -> None:
-        self._load_all_logs()
+        # Schedule async, chunked log loading so the handler returns quickly.
+        asyncio.create_task(self._load_all_logs_async())
 
     async def _create_client(self) -> Client:
         conn = self.config.connection
@@ -722,11 +902,16 @@ class OpcuaTuiApp(App[None]):
         children: list[dict[str, Any]] = []
 
         if depth < max_depth and node_class == ua.NodeClass.Object:
-            for child in await node.get_children(
+            children_nodes = await node.get_children(
                 nodeclassmask=ua.NodeClass.Object
                 | ua.NodeClass.Variable
                 | ua.NodeClass.Method
-            ):
+            )
+            for idx, child in enumerate(children_nodes):
+                # For very large fan-out, yield periodically so the UI event loop
+                # is not starved by deep browse operations.
+                if idx and idx % 50 == 0:
+                    await asyncio.sleep(0)
                 child_tree = await self._browse_nodes(
                     child, depth + 1, max_depth, target_namespaces
                 )
@@ -830,7 +1015,11 @@ class OpcuaTuiApp(App[None]):
         if not self._client:
             return
         client = self._client
-        handler = TuiAlarmHandler(self.config.collect.csv_file, self)
+        handler = TuiAlarmHandler(
+            self.config.collect.csv_file,
+            self,
+            csv_queue=self._alarm_csv_queue,
+        )
 
         self._subscription = await collector_subscribe(
             client,

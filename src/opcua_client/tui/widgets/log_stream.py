@@ -114,6 +114,10 @@ class TuiSqliteLogHandler(logging.Handler):
         )
         self._conn.commit()
         self._last_cleanup: datetime = datetime.now(timezone.utc)
+        # Optional async queue for offloading writes from the UI event loop.
+        # When set by the TUI application, `emit` will enqueue records instead
+        # of writing to SQLite synchronously.
+        self._async_queue = None
         self.setFormatter(
             logging.Formatter(
                 "%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%dT%H:%M:%S"
@@ -151,11 +155,25 @@ class TuiSqliteLogHandler(logging.Handler):
         except Exception:
             return None
 
-    def emit(self, record: logging.LogRecord) -> None:
-        msg = self.format(record)
-        now = datetime.now(timezone.utc)
-        timestamp = now.isoformat()
-        timestamp_epoch = now.timestamp()
+    def set_async_queue(self, queue) -> None:
+        """
+        Configure an asyncio-compatible queue used to offload writes.
+
+        The queue is intentionally untyped here to avoid importing asyncio in
+        this module; the TUI app passes in an `asyncio.Queue` instance.
+        """
+        self._async_queue = queue
+
+    def _write_record_sync(
+        self,
+        *,
+        timestamp: str,
+        timestamp_epoch: float,
+        levelno: int,
+        levelname: str,
+        logger_name: str,
+        message: str,
+    ) -> None:
         self.acquire()
         try:
             self._conn.execute(
@@ -164,12 +182,13 @@ class TuiSqliteLogHandler(logging.Handler):
                 (
                     timestamp,
                     timestamp_epoch,
-                    record.levelno,
-                    record.levelname,
-                    record.name,
-                    msg,
+                    levelno,
+                    levelname,
+                    logger_name,
+                    message,
                 ),
             )
+            now = datetime.now(timezone.utc)
             if now - self._last_cleanup >= timedelta(seconds=60):
                 cutoff = now - timedelta(days=self.retention_days)
                 self._conn.execute(
@@ -182,6 +201,41 @@ class TuiSqliteLogHandler(logging.Handler):
             self.handleError(record)
         finally:
             self.release()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        msg = self.format(record)
+        now = datetime.now(timezone.utc)
+        timestamp = now.isoformat()
+        timestamp_epoch = now.timestamp()
+
+        # When an async queue is configured (TUI context), enqueue the payload
+        # so SQLite writes can happen in a dedicated worker task instead of
+        # blocking the logging caller.
+        if self._async_queue is not None:
+            try:
+                self._async_queue.put_nowait(
+                    (
+                        timestamp,
+                        timestamp_epoch,
+                        record.levelno,
+                        record.levelname,
+                        record.name,
+                        msg,
+                    )
+                )
+                return
+            except Exception:
+                # Fall back to synchronous behavior on enqueue failures.
+                pass
+
+        self._write_record_sync(
+            timestamp=timestamp,
+            timestamp_epoch=timestamp_epoch,
+            levelno=record.levelno,
+            levelname=record.levelname,
+            logger_name=record.name,
+            message=msg,
+        )
 
     def fetch_since(self, last_id: int, limit: int = 1000) -> List[SqliteLogRow]:
         """
