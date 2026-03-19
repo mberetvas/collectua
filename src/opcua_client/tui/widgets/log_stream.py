@@ -5,7 +5,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import List
 
 from rich.text import Text
 from textual.widgets import RichLog
@@ -92,6 +92,7 @@ class TuiSqliteLogHandler(logging.Handler):
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp_utc TEXT NOT NULL,
+                timestamp_epoch REAL NOT NULL,
                 levelno INTEGER NOT NULL,
                 levelname TEXT NOT NULL,
                 logger_name TEXT NOT NULL,
@@ -99,25 +100,77 @@ class TuiSqliteLogHandler(logging.Handler):
             )
             """
         )
-        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp_utc)")
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp_utc)"
+        )
+        self._ensure_timestamp_epoch_column()
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_logs_timestamp_epoch ON logs(timestamp_epoch)"
+        )
         self._conn.commit()
         self._last_cleanup: datetime = datetime.now(timezone.utc)
-        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%dT%H:%M:%S"))
+        self.setFormatter(
+            logging.Formatter(
+                "%(asctime)s %(levelname)s %(name)s: %(message)s", "%Y-%m-%dT%H:%M:%S"
+            )
+        )
         self.createLock()
+
+    def _ensure_timestamp_epoch_column(self) -> None:
+        columns = self._conn.execute("PRAGMA table_info(logs)").fetchall()
+        if any(str(column[1]) == "timestamp_epoch" for column in columns):
+            return
+
+        self._conn.execute("ALTER TABLE logs ADD COLUMN timestamp_epoch REAL")
+        rows = self._conn.execute(
+            "SELECT id, timestamp_utc FROM logs WHERE timestamp_epoch IS NULL"
+        ).fetchall()
+        for row_id, timestamp_utc in rows:
+            parsed_epoch = self._parse_timestamp_utc(timestamp_utc)
+            # Keep malformed legacy rows from breaking startup.
+            self._conn.execute(
+                "UPDATE logs SET timestamp_epoch = ? WHERE id = ?",
+                (parsed_epoch if parsed_epoch is not None else 0.0, row_id),
+            )
+
+    @staticmethod
+    def _parse_timestamp_utc(value: str) -> float | None:
+        try:
+            normalized = value.strip()
+            if normalized.endswith("Z"):
+                normalized = f"{normalized[:-1]}+00:00"
+            parsed = datetime.fromisoformat(normalized)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except Exception:
+            return None
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = self.format(record)
-        timestamp = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(timezone.utc)
+        timestamp = now.isoformat()
+        timestamp_epoch = now.timestamp()
         self.acquire()
         try:
             self._conn.execute(
-                "INSERT INTO logs (timestamp_utc, levelno, levelname, logger_name, message) VALUES (?, ?, ?, ?, ?)",
-                (timestamp, record.levelno, record.levelname, record.name, msg),
+                "INSERT INTO logs (timestamp_utc, timestamp_epoch, levelno, levelname, logger_name, message) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    timestamp,
+                    timestamp_epoch,
+                    record.levelno,
+                    record.levelname,
+                    record.name,
+                    msg,
+                ),
             )
-            now = datetime.now(timezone.utc)
             if now - self._last_cleanup >= timedelta(seconds=60):
                 cutoff = now - timedelta(days=self.retention_days)
-                self._conn.execute("DELETE FROM logs WHERE timestamp_utc < ?", (cutoff.isoformat(),))
+                self._conn.execute(
+                    "DELETE FROM logs WHERE timestamp_epoch < ?",
+                    (cutoff.timestamp(),),
+                )
                 self._last_cleanup = now
             self._conn.commit()
         except Exception:
