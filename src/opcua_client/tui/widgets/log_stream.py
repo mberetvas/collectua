@@ -38,15 +38,20 @@ class LogStreamWidget(RichLog):
             # user is reading older entries.
             self.write(renderable, scroll_end=False)
 
-    def export_text(self, min_level: int = logging.NOTSET) -> str:
+    def export_text(
+        self, min_level: int = logging.NOTSET, exact_level: int | None = None
+    ) -> str:
         """
         Export the current buffer as plain text in the same order as rendered
-        (newest first).  Pass ``min_level`` to include only entries at or above
-        that severity (e.g. ``logging.ERROR``).
+        (newest first). Pass ``min_level`` to include only entries at or above
+        that severity (e.g. ``logging.ERROR``). Pass ``exact_level`` to include
+        only that exact severity.
         """
         # Rich/Textual renderables are stored oldest->newest; UI shows newest->oldest.
         lines: list[str] = []
         for levelno, entry in reversed(self._entries):
+            if exact_level is not None and levelno != exact_level:
+                continue
             if levelno < min_level:
                 continue
             try:

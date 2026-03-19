@@ -5,11 +5,12 @@ import logging
 from types import SimpleNamespace
 
 from asyncua import ua
+from rich.text import Text
 
 from opcua_client.domain.alarm import Alarm
 from opcua_client.config.runtime_config import BrowseConfig, CollectConfig, ConnectionConfig, RuntimeConfig
 from opcua_client.tui.app import OpcuaTuiApp
-from opcua_client.tui.widgets.log_stream import SqliteLogRow
+from opcua_client.tui.widgets.log_stream import LogStreamWidget, SqliteLogRow
 
 
 def test_create_client_normalizes_string_auth_policy(monkeypatch) -> None:
@@ -358,3 +359,79 @@ def test_load_all_logs_uses_fetch_recent_without_reformatting(monkeypatch) -> No
     assert log_stream.cleared
     assert [text for _, text in log_stream.entries] == [row.message for row in reversed(rows)]
     assert app._last_log_row_id == rows[0].id
+
+
+def test_action_copy_warnings_copies_exact_warning_level(monkeypatch) -> None:
+    class DummyLogStream:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int | None]] = []
+
+        def export_text(
+            self, min_level: int = logging.NOTSET, exact_level: int | None = None
+        ) -> str:
+            self.calls.append((min_level, exact_level))
+            if exact_level == logging.WARNING:
+                return "warn-one\nwarn-two\n"
+            return ""
+
+    config = RuntimeConfig(
+        command="tui",
+        connection=ConnectionConfig(url="opc.tcp://localhost:50000", timeout=5.0),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+    app = OpcuaTuiApp(config)
+    log_stream = DummyLogStream()
+    clipboard: list[str] = []
+    notices: list[str] = []
+
+    monkeypatch.setattr(app, "query_one", lambda selector: log_stream)
+    monkeypatch.setattr(app, "_copy_to_clipboard_robust", lambda text: clipboard.append(text))
+    monkeypatch.setattr(app, "notify", lambda message, timeout=0.0: notices.append(message))
+
+    app.action_copy_warnings()
+
+    assert log_stream.calls == [(logging.NOTSET, logging.WARNING)]
+    assert clipboard == ["warn-one\nwarn-two\n"]
+    assert notices == ["Copied warning logs to clipboard."]
+
+
+def test_action_copy_warnings_notifies_when_no_warnings(monkeypatch) -> None:
+    class DummyLogStream:
+        def export_text(
+            self, min_level: int = logging.NOTSET, exact_level: int | None = None
+        ) -> str:
+            return ""
+
+    config = RuntimeConfig(
+        command="tui",
+        connection=ConnectionConfig(url="opc.tcp://localhost:50000", timeout=5.0),
+        browse=BrowseConfig(),
+        collect=CollectConfig(),
+    )
+    app = OpcuaTuiApp(config)
+    clipboard: list[str] = []
+    notices: list[str] = []
+
+    monkeypatch.setattr(app, "query_one", lambda selector: DummyLogStream())
+    monkeypatch.setattr(app, "_copy_to_clipboard_robust", lambda text: clipboard.append(text))
+    monkeypatch.setattr(app, "notify", lambda message, timeout=0.0: notices.append(message))
+
+    app.action_copy_warnings()
+
+    assert clipboard == []
+    assert notices == ["No warnings to copy yet."]
+
+
+def test_log_stream_export_text_exact_warning_preserves_panel_order() -> None:
+    log_stream = LogStreamWidget()
+    log_stream._entries = [
+        (logging.INFO, Text("info-oldest")),
+        (logging.WARNING, Text("warn-older")),
+        (logging.ERROR, Text("error-middle")),
+        (logging.WARNING, Text("warn-newest")),
+    ]
+
+    exported = log_stream.export_text(exact_level=logging.WARNING)
+
+    assert exported == "warn-newest\nwarn-older\n"

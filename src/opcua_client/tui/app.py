@@ -78,6 +78,7 @@ class HelpScreen(ModalScreen[None]):
                     "a: Acknowledge selected alarm",
                     "l: Copy all logs",
                     "e: Copy error logs",
+                    "w: Copy warning logs",
                     "↑/↓: Previous/next sibling node (when Node Tree is focused)",
                     "→: Expand node or focus first child",
                     "←: Collapse node or focus parent",
@@ -344,6 +345,7 @@ class OpcuaTuiApp(App[None]):
         Binding("a", "acknowledge_selected_alarm", "Ack Alarm"),
         Binding("l", "copy_logs", "Copy Logs"),
         Binding("e", "copy_errors", "Copy Errors"),
+        Binding("w", "copy_warnings", "Copy Warnings"),
         Binding("?", "help", "Help"),
         Binding("v", "toggle_logs", "Toggle Logs"),
         Binding("p", "toggle_config", "Toggle Config"),
@@ -402,6 +404,11 @@ class OpcuaTuiApp(App[None]):
                                 )
                                 yield Button(
                                     "Copy Errors", id="btn-copy-errors", variant="error"
+                                )
+                                yield Button(
+                                    "Copy Warnings",
+                                    id="btn-copy-warnings",
+                                    variant="warning",
                                 )
                             yield LogStreamWidget(id="log-stream")
         yield Footer()
@@ -519,6 +526,26 @@ class OpcuaTuiApp(App[None]):
             _logger.exception("Failed to copy error logs to clipboard")
             self.notify(f"Failed to copy errors: {exc}", timeout=3.0)
 
+    def action_copy_warnings(self) -> None:
+        try:
+            log_stream = self.query_one("#log-stream")
+            export_text = getattr(log_stream, "export_text", None)
+            text = (
+                export_text(exact_level=logging.WARNING)
+                if callable(export_text)
+                else ""
+            )
+
+            if not text.strip():
+                self.notify("No warnings to copy yet.", timeout=2.0)
+                return
+
+            self._copy_to_clipboard_robust(text)
+            self.notify("Copied warning logs to clipboard.", timeout=2.0)
+        except Exception as exc:
+            _logger.exception("Failed to copy warning logs to clipboard")
+            self.notify(f"Failed to copy warnings: {exc}", timeout=3.0)
+
     @on(Button.Pressed, "#btn-copy-logs")
     def on_copy_logs_button(self) -> None:
         self.action_copy_logs()
@@ -526,6 +553,10 @@ class OpcuaTuiApp(App[None]):
     @on(Button.Pressed, "#btn-copy-errors")
     def on_copy_errors_button(self) -> None:
         self.action_copy_errors()
+
+    @on(Button.Pressed, "#btn-copy-warnings")
+    def on_copy_warnings_button(self) -> None:
+        self.action_copy_warnings()
 
     @on(Button.Pressed, "#btn-refresh-logs")
     def on_refresh_logs_button(self) -> None:
