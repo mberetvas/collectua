@@ -27,6 +27,10 @@ CSV_FILE = get_str("OPCUA_CSV_FILE", "alarms.csv")
 PUBLISH_INTERVAL_MS = get_int("OPCUA_PUBLISH_INTERVAL_MS", 500)
 RECONNECT_DELAY_SEC = get_int("OPCUA_RECONNECT_DELAY_SEC", 5)
 TIMEOUT = get_float("OPCUA_TIMEOUT", 30.0)
+STARTUP_CONDITION_REFRESH_DELAY_SEC = get_float(
+    "OPCUA_STARTUP_CONDITION_REFRESH_DELAY_SEC",
+    7.0,
+)
 # ────────────────────────────────────────────────────────
 
 CSV_HEADERS = [
@@ -330,7 +334,7 @@ async def subscribe(
 
         async def _run_condition_refresh() -> None:
             # Delay ConditionRefresh slightly so the subscription is fully established.
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(STARTUP_CONDITION_REFRESH_DELAY_SEC)
             if is_active is not None and not is_active():
                 _logger.info(
                     "Skipping ConditionRefresh for SubscriptionId=%s: collector no longer active",

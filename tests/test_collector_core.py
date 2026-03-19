@@ -200,6 +200,7 @@ def test_subscribe_creates_subscription_and_runs_condition_refresh(monkeypatch: 
         calls["is_active"] = is_active
 
     monkeypatch.setattr(collector, "condition_refresh_with_retry", fake_condition_refresh)
+    monkeypatch.setattr(collector, "STARTUP_CONDITION_REFRESH_DELAY_SEC", 0.0)
 
     # is_active=None => _run_condition_refresh is awaited inline.
     sub = asyncio.run(
@@ -228,6 +229,7 @@ def test_subscribe_skips_condition_refresh_when_not_active(monkeypatch: pytest.M
         called["refresh"] = True
 
     monkeypatch.setattr(collector, "condition_refresh_with_retry", fake_condition_refresh)
+    monkeypatch.setattr(collector, "STARTUP_CONDITION_REFRESH_DELAY_SEC", 0.0)
 
     # is_active returns False, so background task should short-circuit before calling condition_refresh.
     def is_active() -> bool:

@@ -82,6 +82,11 @@ Footer {
     border: tall #ff5f5f;
 }
 
+#log-actions #btn-copy-warnings {
+    color: #ffbf4d;
+    border: tall #ffbf4d;
+}
+
 #node-search {
     border: round #2a7d3e;
     background: #071207;

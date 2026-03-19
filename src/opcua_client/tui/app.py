@@ -39,6 +39,7 @@ from opcua_client.ops.condition_refresh import condition_refresh_with_retry
 from opcua_client.ops.collector import (
     CSV_HEADERS,
     OverloadRecoveryMonitor,
+    STARTUP_CONDITION_REFRESH_DELAY_SEC,
     acknowledge_alarm,
     apply_session_locales,
     subscribe as collector_subscribe,
@@ -847,7 +848,7 @@ class OpcuaTuiApp(App[None]):
         subscription_id = subscription.subscription_id
 
         async def _run_condition_refresh() -> None:
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(STARTUP_CONDITION_REFRESH_DELAY_SEC)
             if (
                 self._shutdown_requested
                 or self._client is not client
