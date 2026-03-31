@@ -1,7 +1,7 @@
 [project]
 name = "opcua-client"
 version = "0.2.0"
-description = "Add your description here"
+description = "Terminal dashboard & CLI for OPC UA alarm monitoring and collection"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

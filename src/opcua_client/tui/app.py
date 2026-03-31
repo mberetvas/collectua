@@ -31,7 +31,7 @@ from textual.widgets import (
 
 from opcua_client.domain.alarm import Alarm
 from opcua_client.domain.connection import AuthPolicy
-from opcua_client.config.app_paths import collectua_logs_dir, collectua_tui_dir
+from opcua_client.config.app_paths import collectua_tui_dir
 from opcua_client.config.env_defaults import get_formatted_str
 from opcua_client.config.runtime_config import RuntimeConfig
 from opcua_client.infrastructure.asyncua_compat import patch_create_session_server_uri
