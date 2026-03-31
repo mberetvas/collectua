@@ -353,7 +353,7 @@ def test_load_all_logs_uses_fetch_recent_without_reformatting(monkeypatch) -> No
     app._log_handler = handler
     monkeypatch.setattr(app, "query_one", lambda selector: log_stream)
 
-    app._load_all_logs()
+    asyncio.run(app._load_all_logs_async())
 
     assert handler.calls == [1000]
     assert log_stream.cleared

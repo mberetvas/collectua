@@ -10,7 +10,6 @@ Long-running script that:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol, Sequence
 
 from asyncua import Client, ua
@@ -18,7 +17,7 @@ from asyncua import Client, ua
 from ..config.env_defaults import get_float, get_int, get_str
 from ..domain.alarm import Alarm
 from ..infrastructure.asyncua_adapter import event_to_alarm
-from ..infrastructure.csv_writer import CSVAlarmWriter
+from ..infrastructure.csv_writer import CSV_HEADERS, CSVAlarmWriter
 from ..infrastructure.repositories import InMemoryAlarmRepository
 from .condition_refresh import condition_refresh_with_retry
 
@@ -32,21 +31,6 @@ STARTUP_CONDITION_REFRESH_DELAY_SEC = get_float(
     7.0,
 )
 # ────────────────────────────────────────────────────────
-
-CSV_HEADERS = [
-    "timestamp_utc",
-    "event_type",
-    "source_name",
-    "message",
-    "severity",
-    "condition_name",
-    "event_id",
-    "condition_id",
-    "retain",
-    "active_state",
-    "acked_state",
-    "raw",
-]
 
 _logger = logging.getLogger("collector")
 DEFAULT_ACK_COMMENT = "acknowledged"
